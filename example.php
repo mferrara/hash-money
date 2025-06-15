@@ -15,7 +15,7 @@ declare(strict_types=1);
 
 require __DIR__.'/vendor/autoload.php';
 
-use LegitPHP\Hash\PerceptualHash;
+use LegitPHP\HashMoney\PerceptualHash;
 
 // Check PHP integer size
 if (PHP_INT_SIZE < 8) {

@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace LegitPHP\Hash;
+namespace LegitPHP\HashMoney;
 
 use Exception;
 use Jcupitt\Vips\Config;

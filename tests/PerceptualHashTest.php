@@ -1,6 +1,6 @@
 <?php
 
-use LegitPHP\Hash\PerceptualHash;
+use LegitPHP\HashMoney\PerceptualHash;
 
 test('can generate hash from file', function () {
     $hash = PerceptualHash::hashFromFile(__DIR__.'/../images/cat1.jpg');

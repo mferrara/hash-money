@@ -1,15 +1,16 @@
-# Hashes.
+# Hash Money 💰
 
-[![Latest Version on Packagist](https://img.shields.io/packagist/v/legitphp/hash.svg?style=flat-square)](https://packagist.org/packages/legitphp/hash)
-[![Tests](https://img.shields.io/github/actions/workflow/status/legitphp/hash/run-tests.yml?branch=main&label=tests&style=flat-square)](https://github.com/legitphp/hash/actions/workflows/run-tests.yml)
-[![Total Downloads](https://img.shields.io/packagist/dt/legitphp/hash.svg?style=flat-square)](https://packagist.org/packages/legitphp/hash)
+[![Latest Version on Packagist](https://img.shields.io/packagist/v/legitphp/hash-money.svg?style=flat-square)](https://packagist.org/packages/legitphp/hash-money)
+[![Tests](https://img.shields.io/github/actions/workflow/status/mferrara/hash/run-tests.yml?branch=main&label=tests&style=flat-square)](https://github.com/mferrara/hash/actions/workflows/run-tests.yml)
+[![Total Downloads](https://img.shields.io/packagist/dt/legitphp/hash-money.svg?style=flat-square)](https://packagist.org/packages/legitphp/hash-money)
+
+**Cache rules everything around me.**
 
 Onions? Eggs? What do you like with your hash?
 
-# Hash
+# Hash Money
 
-We're aiming to provide a performance-oriented and opinionated collection of image hashing algorithms for PHP. We'll 
-be leaning hard on [php-vips](https://github.com/php-vips/php-vips). Get your FFI poppin'.
+We're serving up a performance-oriented and opinionated collection of similarity hashing algorithms for PHP. Whether you're comparing images, finding duplicates, or measuring how alike things are - we got you covered. We're riding dirty with [php-vips](https://github.com/php-vips/php-vips) for maximum speed. Get your FFI poppin'.
 
 ## Perceptual Hashing
 
@@ -24,13 +25,13 @@ requests by [jcupitt](https://github.com/jcupitt) and others, which I've tried t
 You can install the package via composer:
 
 ```bash
-composer require legitphp/hash
+composer require legitphp/hash-money
 ```
 
 ## Usage
 
 ```php
-use LegitPHP\Hash\PerceptualHash;
+use LegitPHP\HashMoney\PerceptualHash;
 
 // Generate a perceptual hash from a file
 $hash = PerceptualHash::hashFromFile('/path/to/image.jpg');
