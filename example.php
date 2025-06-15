@@ -2,6 +2,17 @@
 
 declare(strict_types=1);
 
+/**
+ * Development Example Script
+ * 
+ * This script demonstrates the performance and capabilities of the PerceptualHash class.
+ * It's intended for development and benchmarking purposes, not for production use.
+ * 
+ * To run: php example.php
+ * 
+ * Note: Test images must be present in the images/ directory
+ */
+
 require __DIR__.'/vendor/autoload.php';
 
 use LegitPHP\Hash\PerceptualHash;

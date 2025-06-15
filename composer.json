@@ -6,8 +6,13 @@
         "hash",
         "image",
         "perceptual-hash",
+        "phash",
         "vips",
-        "image-processing"
+        "libvips",
+        "image-processing",
+        "image-comparison",
+        "image-similarity",
+        "hamming-distance"
     ],
     "homepage": "https://github.com/legitphp/hash",
     "license": "MIT",
