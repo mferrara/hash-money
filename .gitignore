@@ -31,3 +31,5 @@ psalm.xml
 testbench.yaml
 /docs
 /coverage
+.claude/
+CLAUDE.md
