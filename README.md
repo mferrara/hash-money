@@ -14,7 +14,7 @@ We're serving up a performance-oriented and opinionated collection of similarity
 
 ## Perceptual Hashing
 
-I lifted much of this directly from the [PerceptualHash](https://github.com/sidus/perceptual-hash) package, 
+I lifted much of this directly from the [VincentChalnot/PerceptualHash](https://github.com/VincentChalnot/perceptual-hash) package, 
 which is a great library for generating perceptual hashes of images.
 
 Many of the performance improvements come from various optimizations I've come across in comments on issues and pull
