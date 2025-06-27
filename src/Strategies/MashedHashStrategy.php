@@ -205,33 +205,38 @@ class MashedHashStrategy extends AbstractHashStrategy
             $image = $image->colourspace('srgb');
         }
 
-        // Calculate colorfulness using standard deviation of color channels
+        // Calculate colorfulness using color channel differences
+        // Note: We avoid using deviation to ensure consistent hashes
         $stats = $image->stats();
         
-        // Extract channel statistics (stats returns a 10x(bands+1) array)
-        // Row 1 = min, Row 2 = max, Row 3 = sum, Row 4 = sum^2, Row 5 = mean, Row 6 = deviation
-        $rDev = $stats->getpoint(6, 1)[0]; // Red channel std deviation
-        $gDev = $stats->getpoint(6, 2)[0]; // Green channel std deviation
-        $bDev = $stats->getpoint(6, 3)[0]; // Blue channel std deviation
-        
-        // Also check if R=G=B (which means grayscale even if 3 channels)
+        // Get mean and range for each channel
         $rMean = $stats->getpoint(5, 1)[0];
         $gMean = $stats->getpoint(5, 2)[0];
         $bMean = $stats->getpoint(5, 3)[0];
         
+        $rMin = $stats->getpoint(1, 1)[0];
+        $gMin = $stats->getpoint(1, 2)[0];
+        $bMin = $stats->getpoint(1, 3)[0];
+        
+        $rMax = $stats->getpoint(2, 1)[0];
+        $gMax = $stats->getpoint(2, 2)[0];
+        $bMax = $stats->getpoint(2, 3)[0];
+        
+        // Calculate channel ranges
+        $rRange = $rMax - $rMin;
+        $gRange = $gMax - $gMin;
+        $bRange = $bMax - $bMin;
+        
         $meanDiff = abs($rMean - $gMean) + abs($gMean - $bMean) + abs($rMean - $bMean);
         
         // If channels are very similar, it's effectively grayscale
-        if ($meanDiff < 5 && ($rDev + $gDev + $bDev) < 10) {
+        if ($meanDiff < 5 && ($rRange + $gRange + $bRange) < 30) {
             return 1; // Grayscale or very desaturated
         }
         
-        // Average deviation across channels
-        $avgDeviation = ($rDev + $gDev + $bDev) / 3;
-        
-        // Normalize to 4-15 range for color images
-        // Typical std dev ranges from 0 (solid color) to ~100 (very colorful)
-        $colorfulness = 4 + (int)min(11, $avgDeviation / 8);
+        // Use average range and mean differences to estimate colorfulness
+        $avgRange = ($rRange + $gRange + $bRange) / 3;
+        $colorfulness = 4 + (int)min(11, ($avgRange + $meanDiff) / 20);
         
         return $colorfulness;
     }
@@ -314,23 +319,23 @@ class MashedHashStrategy extends AbstractHashStrategy
         $left = $image->crop(0, 0, $borderSize, $height);
         $right = $image->crop($width - $borderSize, 0, $borderSize, $height);
         
-        // Calculate standard deviation for each edge
+        // Calculate range for each edge (avoiding deviation)
         $topStats = $top->stats();
-        $topDev = $topStats->getpoint(6, 0)[0]; // Deviation of all bands
+        $topRange = $topStats->getpoint(2, 0)[0] - $topStats->getpoint(1, 0)[0]; // Max - Min of all bands
         
         $bottomStats = $bottom->stats();
-        $bottomDev = $bottomStats->getpoint(6, 0)[0];
+        $bottomRange = $bottomStats->getpoint(2, 0)[0] - $bottomStats->getpoint(1, 0)[0];
         
         $leftStats = $left->stats();
-        $leftDev = $leftStats->getpoint(6, 0)[0];
+        $leftRange = $leftStats->getpoint(2, 0)[0] - $leftStats->getpoint(1, 0)[0];
         
         $rightStats = $right->stats();
-        $rightDev = $rightStats->getpoint(6, 0)[0];
+        $rightRange = $rightStats->getpoint(2, 0)[0] - $rightStats->getpoint(1, 0)[0];
         
-        // Low deviation on all edges suggests a uniform border
-        $threshold = 10.0;
-        return $topDev < $threshold && $bottomDev < $threshold && 
-               $leftDev < $threshold && $rightDev < $threshold;
+        // Low range on all edges suggests a uniform border
+        $threshold = 30.0;
+        return $topRange < $threshold && $bottomRange < $threshold && 
+               $leftRange < $threshold && $rightRange < $threshold;
     }
 
     /**
@@ -346,32 +351,32 @@ class MashedHashStrategy extends AbstractHashStrategy
         // Simple approach: analyze color channel statistics
         $stats = $image->stats();
         
-        // Get mean and deviation for each channel
+        // Get mean values for each channel
+        // Note: We use only mean values (not deviation) to ensure consistent hashes
+        // VIPS stats() can return slightly different deviation values between runs
         $rMean = $stats->getpoint(5, 1)[0];
         $gMean = $stats->getpoint(5, 2)[0];
         $bMean = $stats->getpoint(5, 3)[0];
         
-        $rDev = $stats->getpoint(6, 1)[0];
-        $gDev = $stats->getpoint(6, 2)[0];
-        $bDev = $stats->getpoint(6, 3)[0];
-        
         // Encode color characteristics into 16 bits
         $distribution = 0;
         
-        // Bits 0-4: Red channel characteristics
-        $rChar = (int)min(31, ($rMean / 8) + ($rDev / 16));
+        // Bits 0-4: Red channel mean (0-255 mapped to 0-31)
+        $rChar = (int)min(31, $rMean / 8);
         $distribution |= ($rChar & 0x1F);
         
-        // Bits 5-9: Green channel characteristics
-        $gChar = (int)min(31, ($gMean / 8) + ($gDev / 16));
+        // Bits 5-9: Green channel mean (0-255 mapped to 0-31)
+        $gChar = (int)min(31, $gMean / 8);
         $distribution |= (($gChar & 0x1F) << 5);
         
-        // Bits 10-14: Blue channel characteristics
-        $bChar = (int)min(31, ($bMean / 8) + ($bDev / 16));
+        // Bits 10-14: Blue channel mean (0-255 mapped to 0-31)
+        $bChar = (int)min(31, $bMean / 8);
         $distribution |= (($bChar & 0x1F) << 10);
         
-        // Bit 15: High color variance flag
-        if (($rDev + $gDev + $bDev) / 3 > 40) {
+        // Bit 15: Color dominance flag (set if one channel is significantly higher)
+        $maxMean = max($rMean, $gMean, $bMean);
+        $minMean = min($rMean, $gMean, $bMean);
+        if ($maxMean - $minMean > 50) {
             $distribution |= (1 << 15);
         }
         
@@ -432,13 +437,17 @@ class MashedHashStrategy extends AbstractHashStrategy
         $stats = $gray->stats();
         
         $mean = $stats->getpoint(5, 1)[0];      // Mean brightness
-        $deviation = $stats->getpoint(6, 1)[0]; // Std deviation
+        $min = $stats->getpoint(1, 1)[0];       // Min brightness
+        $max = $stats->getpoint(2, 1)[0];       // Max brightness
         
-        // Encode mean (4 bits) and variance (4 bits)
+        // Use range instead of deviation for consistency
+        $range = $max - $min;
+        
+        // Encode mean (4 bits) and range (4 bits)
         $meanBits = (int)min(15, $mean / 17);      // 0-255 -> 0-15
-        $devBits = (int)min(15, $deviation / 6.5); // 0-100 -> 0-15
+        $rangeBits = (int)min(15, $range / 17);    // 0-255 -> 0-15
         
-        return ($meanBits << 4) | $devBits;
+        return ($meanBits << 4) | $rangeBits;
     }
 
     /**
@@ -471,23 +480,31 @@ class MashedHashStrategy extends AbstractHashStrategy
      */
     private function computeDominantColorCount(VipsImage $image): int
     {
-        // Simplified: use color variance as proxy for color count
+        // Use color ranges as proxy for color count (avoiding deviation)
         $stats = $image->stats();
         
-        $rDev = $stats->getpoint(6, 1)[0];
-        $gDev = $stats->getpoint(6, 2)[0];
-        $bDev = $stats->getpoint(6, 3)[0];
+        $rMin = $stats->getpoint(1, 1)[0];
+        $gMin = $stats->getpoint(1, 2)[0];
+        $bMin = $stats->getpoint(1, 3)[0];
         
-        $totalDev = $rDev + $gDev + $bDev;
+        $rMax = $stats->getpoint(2, 1)[0];
+        $gMax = $stats->getpoint(2, 2)[0];
+        $bMax = $stats->getpoint(2, 3)[0];
         
-        // Map to dominant color count estimate
+        $rRange = $rMax - $rMin;
+        $gRange = $gMax - $gMin;
+        $bRange = $bMax - $bMin;
+        
+        $totalRange = $rRange + $gRange + $bRange;
+        
+        // Map to dominant color count estimate based on total range
         return match(true) {
-            $totalDev < 30 => 1,   // Very uniform
-            $totalDev < 60 => 2,   // 2-3 dominant colors
-            $totalDev < 90 => 4,   // 4-5 colors
-            $totalDev < 120 => 6,  // 6-8 colors
-            $totalDev < 150 => 8,  // Many colors
-            default => 12          // Very colorful
+            $totalRange < 90 => 1,    // Very uniform
+            $totalRange < 180 => 2,   // 2-3 dominant colors
+            $totalRange < 270 => 4,   // 4-5 colors
+            $totalRange < 360 => 6,   // 6-8 colors
+            $totalRange < 450 => 8,   // Many colors
+            default => 12             // Very colorful
         };
     }
 
@@ -517,12 +534,13 @@ class MashedHashStrategy extends AbstractHashStrategy
         }
         
         // Bit 1: Large uniform regions
-        $devStats = $image->stats();
-        $avgDev = ($devStats->getpoint(6, 1)[0] + 
-                   $devStats->getpoint(6, 2)[0] + 
-                   $devStats->getpoint(6, 3)[0]) / 3;
+        $stats = $image->stats();
+        $rRange = $stats->getpoint(2, 1)[0] - $stats->getpoint(1, 1)[0];
+        $gRange = $stats->getpoint(2, 2)[0] - $stats->getpoint(1, 2)[0];
+        $bRange = $stats->getpoint(2, 3)[0] - $stats->getpoint(1, 3)[0];
+        $avgRange = ($rRange + $gRange + $bRange) / 3;
         
-        if ($avgDev < 15) {
+        if ($avgRange < 45) {
             $indicators |= 2;
         }
         
