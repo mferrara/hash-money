@@ -218,36 +218,36 @@ class MashedHashStrategy extends AbstractHashStrategy
         // Calculate colorfulness using color channel differences
         // Note: We avoid using deviation to ensure consistent hashes
         $stats = $image->stats();
-        
+
         // Get mean and range for each channel
         $rMean = $stats->getpoint(5, 1)[0];
         $gMean = $stats->getpoint(5, 2)[0];
         $bMean = $stats->getpoint(5, 3)[0];
-        
+
         $rMin = $stats->getpoint(1, 1)[0];
         $gMin = $stats->getpoint(1, 2)[0];
         $bMin = $stats->getpoint(1, 3)[0];
-        
+
         $rMax = $stats->getpoint(2, 1)[0];
         $gMax = $stats->getpoint(2, 2)[0];
         $bMax = $stats->getpoint(2, 3)[0];
-        
+
         // Calculate channel ranges
         $rRange = $rMax - $rMin;
         $gRange = $gMax - $gMin;
         $bRange = $bMax - $bMin;
-        
+
         $meanDiff = abs($rMean - $gMean) + abs($gMean - $bMean) + abs($rMean - $bMean);
 
         // If channels are very similar, it's effectively grayscale
         if ($meanDiff < 5 && ($rRange + $gRange + $bRange) < 30) {
             return 1; // Grayscale or very desaturated
         }
-        
+
         // Use average range and mean differences to estimate colorfulness
         $avgRange = ($rRange + $gRange + $bRange) / 3;
-        $colorfulness = 4 + (int)min(11, ($avgRange + $meanDiff) / 20);
-        
+        $colorfulness = 4 + (int) min(11, ($avgRange + $meanDiff) / 20);
+
         return $colorfulness;
     }
 
@@ -328,23 +328,24 @@ class MashedHashStrategy extends AbstractHashStrategy
         $bottom = $image->crop(0, $height - $borderSize, $width, $borderSize);
         $left = $image->crop(0, 0, $borderSize, $height);
         $right = $image->crop($width - $borderSize, 0, $borderSize, $height);
-        
+
         // Calculate range for each edge (avoiding deviation)
         $topStats = $top->stats();
         $topRange = $topStats->getpoint(2, 0)[0] - $topStats->getpoint(1, 0)[0]; // Max - Min of all bands
-        
+
         $bottomStats = $bottom->stats();
         $bottomRange = $bottomStats->getpoint(2, 0)[0] - $bottomStats->getpoint(1, 0)[0];
-        
+
         $leftStats = $left->stats();
         $leftRange = $leftStats->getpoint(2, 0)[0] - $leftStats->getpoint(1, 0)[0];
-        
+
         $rightStats = $right->stats();
         $rightRange = $rightStats->getpoint(2, 0)[0] - $rightStats->getpoint(1, 0)[0];
-        
+
         // Low range on all edges suggests a uniform border
         $threshold = 30.0;
-        return $topRange < $threshold && $bottomRange < $threshold && 
+
+        return $topRange < $threshold && $bottomRange < $threshold &&
                $leftRange < $threshold && $rightRange < $threshold;
     }
 
@@ -360,29 +361,29 @@ class MashedHashStrategy extends AbstractHashStrategy
 
         // Simple approach: analyze color channel statistics
         $stats = $image->stats();
-        
+
         // Get mean values for each channel
         // Note: We use only mean values (not deviation) to ensure consistent hashes
         // VIPS stats() can return slightly different deviation values between runs
         $rMean = $stats->getpoint(5, 1)[0];
         $gMean = $stats->getpoint(5, 2)[0];
         $bMean = $stats->getpoint(5, 3)[0];
-        
+
         // Encode color characteristics into 16 bits
         $distribution = 0;
-        
+
         // Bits 0-4: Red channel mean (0-255 mapped to 0-31)
-        $rChar = (int)min(31, $rMean / 8);
+        $rChar = (int) min(31, $rMean / 8);
         $distribution |= ($rChar & 0x1F);
-        
+
         // Bits 5-9: Green channel mean (0-255 mapped to 0-31)
-        $gChar = (int)min(31, $gMean / 8);
+        $gChar = (int) min(31, $gMean / 8);
         $distribution |= (($gChar & 0x1F) << 5);
-        
+
         // Bits 10-14: Blue channel mean (0-255 mapped to 0-31)
-        $bChar = (int)min(31, $bMean / 8);
+        $bChar = (int) min(31, $bMean / 8);
         $distribution |= (($bChar & 0x1F) << 10);
-        
+
         // Bit 15: Color dominance flag (set if one channel is significantly higher)
         $maxMean = max($rMean, $gMean, $bMean);
         $minMean = min($rMean, $gMean, $bMean);
@@ -449,14 +450,14 @@ class MashedHashStrategy extends AbstractHashStrategy
         $mean = $stats->getpoint(5, 1)[0];      // Mean brightness
         $min = $stats->getpoint(1, 1)[0];       // Min brightness
         $max = $stats->getpoint(2, 1)[0];       // Max brightness
-        
+
         // Use range instead of deviation for consistency
         $range = $max - $min;
-        
+
         // Encode mean (4 bits) and range (4 bits)
-        $meanBits = (int)min(15, $mean / 17);      // 0-255 -> 0-15
-        $rangeBits = (int)min(15, $range / 17);    // 0-255 -> 0-15
-        
+        $meanBits = (int) min(15, $mean / 17);      // 0-255 -> 0-15
+        $rangeBits = (int) min(15, $range / 17);    // 0-255 -> 0-15
+
         return ($meanBits << 4) | $rangeBits;
     }
 
@@ -492,23 +493,23 @@ class MashedHashStrategy extends AbstractHashStrategy
     {
         // Use color ranges as proxy for color count (avoiding deviation)
         $stats = $image->stats();
-        
+
         $rMin = $stats->getpoint(1, 1)[0];
         $gMin = $stats->getpoint(1, 2)[0];
         $bMin = $stats->getpoint(1, 3)[0];
-        
+
         $rMax = $stats->getpoint(2, 1)[0];
         $gMax = $stats->getpoint(2, 2)[0];
         $bMax = $stats->getpoint(2, 3)[0];
-        
+
         $rRange = $rMax - $rMin;
         $gRange = $gMax - $gMin;
         $bRange = $bMax - $bMin;
-        
+
         $totalRange = $rRange + $gRange + $bRange;
-        
+
         // Map to dominant color count estimate based on total range
-        return match(true) {
+        return match (true) {
             $totalRange < 90 => 1,    // Very uniform
             $totalRange < 180 => 2,   // 2-3 dominant colors
             $totalRange < 270 => 4,   // 4-5 colors
@@ -549,7 +550,7 @@ class MashedHashStrategy extends AbstractHashStrategy
         $gRange = $stats->getpoint(2, 2)[0] - $stats->getpoint(1, 2)[0];
         $bRange = $stats->getpoint(2, 3)[0] - $stats->getpoint(1, 3)[0];
         $avgRange = ($rRange + $gRange + $bRange) / 3;
-        
+
         if ($avgRange < 45) {
             $indicators |= 2;
         }
