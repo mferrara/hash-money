@@ -40,9 +40,9 @@ class ColorHistogramHash
     /**
      * Configure the HSV quantization levels.
      *
-     * @param int $hBins Number of hue bins (default: 8)
-     * @param int $sBins Number of saturation bins (default: 4)
-     * @param int $vBins Number of value bins (default: 4)
+     * @param  int  $hBins  Number of hue bins (default: 8)
+     * @param  int  $sBins  Number of saturation bins (default: 4)
+     * @param  int  $vBins  Number of value bins (default: 4)
      */
     public static function configureQuantization(int $hBins, int $sBins, int $vBins): void
     {

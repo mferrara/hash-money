@@ -68,7 +68,6 @@ class PerceptualHashStrategy extends AbstractHashStrategy
         return new HashValue($hashValue, $bits, $this->getAlgorithmName());
     }
 
-
     private function applyDCT(array $pixels, int $size, int $matrixSize): array
     {
         $rows = [];

@@ -9,11 +9,11 @@ use LegitPHP\HashMoney\Strategies\MashedHashStrategy;
 
 /**
  * MashedHash - A comprehensive image fingerprint that "mashes" together multiple characteristics.
- * 
+ *
  * This hash combines color, texture, spatial, and structural features into a single 64-bit hash,
  * designed to reduce false positives when comparing images. It's particularly effective for
  * social media images where filters, borders, and overlays are common.
- * 
+ *
  * Components include:
  * - Colorfulness level (grayscale detection)
  * - Edge density (texture/detail)
@@ -23,7 +23,7 @@ use LegitPHP\HashMoney\Strategies\MashedHashStrategy;
  * - Color distribution
  * - Spatial layout
  * - Brightness patterns
- * 
+ *
  * Use MashedHash alongside pHash/dHash for comprehensive image matching.
  */
 class MashedHash
@@ -46,10 +46,11 @@ class MashedHash
 
     /**
      * Generate a MashedHash from an image file.
-     * 
-     * @param string $filePath Path to the image file
-     * @param int $bits Must be 64 (only 64-bit hashes supported)
+     *
+     * @param  string  $filePath  Path to the image file
+     * @param  int  $bits  Must be 64 (only 64-bit hashes supported)
      * @return HashValue The generated hash
+     *
      * @throws \InvalidArgumentException If bits != 64
      * @throws \Exception If hash generation fails
      */
@@ -60,11 +61,12 @@ class MashedHash
 
     /**
      * Generate a MashedHash from image data in memory.
-     * 
-     * @param string $imageData Raw image data
-     * @param int $bits Must be 64 (only 64-bit hashes supported)
-     * @param array $options Additional options for image loading
+     *
+     * @param  string  $imageData  Raw image data
+     * @param  int  $bits  Must be 64 (only 64-bit hashes supported)
+     * @param  array  $options  Additional options for image loading
      * @return HashValue The generated hash
+     *
      * @throws \InvalidArgumentException If bits != 64
      * @throws \Exception If hash generation fails
      */
@@ -75,10 +77,11 @@ class MashedHash
 
     /**
      * Generate a MashedHash from a VIPS image object.
-     * 
-     * @param VipsImage $image The VIPS image
-     * @param int $bits Must be 64 (only 64-bit hashes supported)
+     *
+     * @param  VipsImage  $image  The VIPS image
+     * @param  int  $bits  Must be 64 (only 64-bit hashes supported)
      * @return HashValue The generated hash
+     *
      * @throws \InvalidArgumentException If bits != 64
      * @throws \Exception If hash generation fails
      */
@@ -89,10 +92,11 @@ class MashedHash
 
     /**
      * Calculate the Hamming distance between two MashedHash values.
-     * 
-     * @param HashValue $hash1 First hash
-     * @param HashValue $hash2 Second hash
+     *
+     * @param  HashValue  $hash1  First hash
+     * @param  HashValue  $hash2  Second hash
      * @return int The Hamming distance (0-64)
+     *
      * @throws \InvalidArgumentException If hashes are incompatible
      */
     public static function distance(HashValue $hash1, HashValue $hash2): int
