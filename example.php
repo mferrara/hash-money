@@ -263,7 +263,7 @@ function checkRelatedImages(string $filename, HashValue $hash, array $hashes, st
         $baseFilenameWithExt = $baseFilename.'.'.$extension;
 
         if (isset($hashes[$baseFilenameWithExt])) {
-            $distance = match($algorithmName) {
+            $distance = match ($algorithmName) {
                 'Perceptual' => PerceptualHash::distance($hashes[$baseFilenameWithExt], $hash),
                 'DHash' => DHash::distance($hashes[$baseFilenameWithExt], $hash),
                 'ColorHistogram' => ColorHistogramHash::distance($hashes[$baseFilenameWithExt], $hash),
@@ -275,7 +275,7 @@ function checkRelatedImages(string $filename, HashValue $hash, array $hashes, st
         // This is a base file, check for any suffixed versions we've already processed
         foreach ($hashes as $processedFile => $processedHash) {
             if ($processedFile !== $filename && getBaseFilename($processedFile) === getBaseFilename($filename)) {
-                $distance = match($algorithmName) {
+                $distance = match ($algorithmName) {
                     'Perceptual' => PerceptualHash::distance($hash, $processedHash),
                     'DHash' => DHash::distance($hash, $processedHash),
                     'ColorHistogram' => ColorHistogramHash::distance($hash, $processedHash),
@@ -302,7 +302,7 @@ function showSimilarityAnalysis(array $hashes, string $algorithmName): void
         for ($j = $i + 1; $j < count($files); $j++) {
             $file1 = $files[$i];
             $file2 = $files[$j];
-            $distance = match($algorithmName) {
+            $distance = match ($algorithmName) {
                 'Perceptual' => PerceptualHash::distance($hashes[$file1], $hashes[$file2]),
                 'DHash' => DHash::distance($hashes[$file1], $hashes[$file2]),
                 'ColorHistogram' => ColorHistogramHash::distance($hashes[$file1], $hashes[$file2]),

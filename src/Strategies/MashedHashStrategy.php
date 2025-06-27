@@ -9,7 +9,7 @@ use LegitPHP\HashMoney\HashValue;
 
 /**
  * MashedHash Strategy - A comprehensive image fingerprint combining multiple characteristics.
- * 
+ *
  * Bit allocation (64 bits total):
  * - Bits 0-3:    Colorfulness level (0-15)
  * - Bits 4-7:    Edge density (0-15)
@@ -26,46 +26,55 @@ use LegitPHP\HashMoney\HashValue;
 class MashedHashStrategy extends AbstractHashStrategy
 {
     private const ALGORITHM_NAME = 'mashed';
-    
-    
+
     // Component bit positions and masks
     private const COLORFULNESS_BITS = 0;
+
     private const COLORFULNESS_MASK = 0xF;
-    
+
     private const EDGE_DENSITY_BITS = 4;
+
     private const EDGE_DENSITY_MASK = 0xF;
-    
+
     private const ENTROPY_BITS = 8;
+
     private const ENTROPY_MASK = 0xF;
-    
+
     private const ASPECT_RATIO_BITS = 12;
+
     private const ASPECT_RATIO_MASK = 0x7;
-    
+
     private const BORDER_FLAG_BIT = 15;
-    
+
     private const COLOR_DIST_BITS = 16;
+
     private const COLOR_DIST_MASK = 0xFFFF;
-    
+
     private const SPATIAL_LAYOUT_BITS = 32;
+
     private const SPATIAL_LAYOUT_MASK = 0xFF;
-    
+
     private const BRIGHTNESS_BITS = 40;
+
     private const BRIGHTNESS_MASK = 0xFF;
-    
+
     private const TEXTURE_BITS = 48;
+
     private const TEXTURE_MASK = 0xFF;
-    
+
     private const DOMINANT_COLOR_BITS = 56;
+
     private const DOMINANT_COLOR_MASK = 0xF;
-    
+
     private const SPECIAL_BITS = 60;
+
     private const SPECIAL_MASK = 0xF;
 
     public function getAlgorithmName(): string
     {
         return self::ALGORITHM_NAME;
     }
-    
+
     public function hashFromFile(string $filePath, int $bits = 64): HashValue
     {
         if ($bits !== 64) {
@@ -78,7 +87,7 @@ class MashedHashStrategy extends AbstractHashStrategy
             // Load original image to check grayscale status
             $originalImage = VipsImage::newFromFile($filePath);
             $isGrayscale = $originalImage->bands === 1 || $originalImage->interpretation === 'b-w';
-            
+
             // Now do thumbnail
             $size = $this->getImageSizeForBits($bits);
             $image = VipsImage::thumbnail($filePath, $size['width'], [
@@ -107,7 +116,7 @@ class MashedHashStrategy extends AbstractHashStrategy
             // Load original image to check grayscale status
             $originalImage = VipsImage::newFromBuffer($imageData);
             $isGrayscale = $originalImage->bands === 1 || $originalImage->interpretation === 'b-w';
-            
+
             // Now do thumbnail
             $size = $this->getImageSizeForBits($bits);
             $image = VipsImage::thumbnail_buffer($imageData, $size['width'], array_merge([
@@ -129,7 +138,7 @@ class MashedHashStrategy extends AbstractHashStrategy
         if ($bits !== 64) {
             throw new \InvalidArgumentException('MashedHash only supports 64-bit hashes');
         }
-        
+
         // Use a moderate size for analysis
         return ['width' => 256, 'height' => 256];
     }
@@ -137,9 +146,10 @@ class MashedHashStrategy extends AbstractHashStrategy
     public function hashFromVipsImage(VipsImage $image, int $bits = 64): HashValue
     {
         $isGrayscale = $image->bands === 1 || $image->interpretation === 'b-w';
+
         return $this->hashFromVipsImageWithGrayscale($image, $bits, $isGrayscale);
     }
-    
+
     private function hashFromVipsImageWithGrayscale(VipsImage $image, int $bits = 64, bool $isGrayscale = false): HashValue
     {
         if ($bits !== 64) {
@@ -152,7 +162,7 @@ class MashedHashStrategy extends AbstractHashStrategy
 
         // Prepare working images
         $workingImage = $this->prepareImage($image);
-        
+
         // Compute all components
         $components = [
             'colorfulness' => $this->computeColorfulness($workingImage, $isGrayscale),
@@ -207,32 +217,32 @@ class MashedHashStrategy extends AbstractHashStrategy
 
         // Calculate colorfulness using standard deviation of color channels
         $stats = $image->stats();
-        
+
         // Extract channel statistics (stats returns a 10x(bands+1) array)
         // Row 1 = min, Row 2 = max, Row 3 = sum, Row 4 = sum^2, Row 5 = mean, Row 6 = deviation
         $rDev = $stats->getpoint(6, 1)[0]; // Red channel std deviation
         $gDev = $stats->getpoint(6, 2)[0]; // Green channel std deviation
         $bDev = $stats->getpoint(6, 3)[0]; // Blue channel std deviation
-        
+
         // Also check if R=G=B (which means grayscale even if 3 channels)
         $rMean = $stats->getpoint(5, 1)[0];
         $gMean = $stats->getpoint(5, 2)[0];
         $bMean = $stats->getpoint(5, 3)[0];
-        
+
         $meanDiff = abs($rMean - $gMean) + abs($gMean - $bMean) + abs($rMean - $bMean);
-        
+
         // If channels are very similar, it's effectively grayscale
         if ($meanDiff < 5 && ($rDev + $gDev + $bDev) < 10) {
             return 1; // Grayscale or very desaturated
         }
-        
+
         // Average deviation across channels
         $avgDeviation = ($rDev + $gDev + $bDev) / 3;
-        
+
         // Normalize to 4-15 range for color images
         // Typical std dev ranges from 0 (solid color) to ~100 (very colorful)
-        $colorfulness = 4 + (int)min(11, $avgDeviation / 8);
-        
+        $colorfulness = 4 + (int) min(11, $avgDeviation / 8);
+
         return $colorfulness;
     }
 
@@ -243,18 +253,18 @@ class MashedHashStrategy extends AbstractHashStrategy
     {
         // Convert to grayscale for edge detection
         $gray = $this->convertToGrayscale($image);
-        
+
         // Apply Sobel edge detection
         $edges = $gray->sobel();
-        
+
         // Calculate average edge magnitude
         $stats = $edges->stats();
         $meanEdge = $stats->getpoint(5, 1)[0]; // Mean of first band
-        
+
         // Normalize to 0-15 range
         // Typical edge values range from 0 to ~50
-        $edgeDensity = (int)min(15, $meanEdge / 3.2);
-        
+        $edgeDensity = (int) min(15, $meanEdge / 3.2);
+
         return $edgeDensity;
     }
 
@@ -265,17 +275,17 @@ class MashedHashStrategy extends AbstractHashStrategy
     {
         // Convert to grayscale
         $gray = $this->convertToGrayscale($image);
-        
+
         // Generate histogram
         $hist = $gray->hist_find();
-        
+
         // Calculate entropy
         $entropy = $hist->hist_entropy();
-        
+
         // Normalize to 0-15 range
         // Entropy typically ranges from 0 to ~8
-        $complexity = (int)min(15, $entropy * 2);
-        
+        $complexity = (int) min(15, $entropy * 2);
+
         return $complexity;
     }
 
@@ -285,8 +295,8 @@ class MashedHashStrategy extends AbstractHashStrategy
     private function encodeAspectRatio(int $width, int $height): int
     {
         $ratio = $width / $height;
-        
-        return match(true) {
+
+        return match (true) {
             $ratio < 0.5 => 0,   // Very tall
             $ratio < 0.8 => 1,   // Portrait
             $ratio < 1.2 => 2,   // Square-ish
@@ -304,32 +314,33 @@ class MashedHashStrategy extends AbstractHashStrategy
     {
         $width = $image->width;
         $height = $image->height;
-        
+
         // Sample edge pixels
-        $borderSize = (int)min(20, $width * 0.05, $height * 0.05);
-        
+        $borderSize = (int) min(20, $width * 0.05, $height * 0.05);
+
         // Extract edge regions
         $top = $image->crop(0, 0, $width, $borderSize);
         $bottom = $image->crop(0, $height - $borderSize, $width, $borderSize);
         $left = $image->crop(0, 0, $borderSize, $height);
         $right = $image->crop($width - $borderSize, 0, $borderSize, $height);
-        
+
         // Calculate standard deviation for each edge
         $topStats = $top->stats();
         $topDev = $topStats->getpoint(6, 0)[0]; // Deviation of all bands
-        
+
         $bottomStats = $bottom->stats();
         $bottomDev = $bottomStats->getpoint(6, 0)[0];
-        
+
         $leftStats = $left->stats();
         $leftDev = $leftStats->getpoint(6, 0)[0];
-        
+
         $rightStats = $right->stats();
         $rightDev = $rightStats->getpoint(6, 0)[0];
-        
+
         // Low deviation on all edges suggests a uniform border
         $threshold = 10.0;
-        return $topDev < $threshold && $bottomDev < $threshold && 
+
+        return $topDev < $threshold && $bottomDev < $threshold &&
                $leftDev < $threshold && $rightDev < $threshold;
     }
 
@@ -342,39 +353,39 @@ class MashedHashStrategy extends AbstractHashStrategy
         if ($image->interpretation !== 'srgb' && $image->interpretation !== 'rgb') {
             $image = $image->colourspace('srgb');
         }
-        
+
         // Simple approach: analyze color channel statistics
         $stats = $image->stats();
-        
+
         // Get mean and deviation for each channel
         $rMean = $stats->getpoint(5, 1)[0];
         $gMean = $stats->getpoint(5, 2)[0];
         $bMean = $stats->getpoint(5, 3)[0];
-        
+
         $rDev = $stats->getpoint(6, 1)[0];
         $gDev = $stats->getpoint(6, 2)[0];
         $bDev = $stats->getpoint(6, 3)[0];
-        
+
         // Encode color characteristics into 16 bits
         $distribution = 0;
-        
+
         // Bits 0-4: Red channel characteristics
-        $rChar = (int)min(31, ($rMean / 8) + ($rDev / 16));
+        $rChar = (int) min(31, ($rMean / 8) + ($rDev / 16));
         $distribution |= ($rChar & 0x1F);
-        
+
         // Bits 5-9: Green channel characteristics
-        $gChar = (int)min(31, ($gMean / 8) + ($gDev / 16));
+        $gChar = (int) min(31, ($gMean / 8) + ($gDev / 16));
         $distribution |= (($gChar & 0x1F) << 5);
-        
+
         // Bits 10-14: Blue channel characteristics
-        $bChar = (int)min(31, ($bMean / 8) + ($bDev / 16));
+        $bChar = (int) min(31, ($bMean / 8) + ($bDev / 16));
         $distribution |= (($bChar & 0x1F) << 10);
-        
+
         // Bit 15: High color variance flag
         if (($rDev + $gDev + $bDev) / 3 > 40) {
             $distribution |= (1 << 15);
         }
-        
+
         return $distribution;
     }
 
@@ -385,9 +396,9 @@ class MashedHashStrategy extends AbstractHashStrategy
     {
         $width = $image->width;
         $height = $image->height;
-        $halfW = (int)($width / 2);
-        $halfH = (int)($height / 2);
-        
+        $halfW = (int) ($width / 2);
+        $halfH = (int) ($height / 2);
+
         // Extract quadrants
         $quadrants = [
             $image->crop(0, 0, $halfW, $halfH),           // Top-left
@@ -395,17 +406,17 @@ class MashedHashStrategy extends AbstractHashStrategy
             $image->crop(0, $halfH, $halfW, $halfH),      // Bottom-left
             $image->crop($halfW, $halfH, $halfW, $halfH), // Bottom-right
         ];
-        
+
         $layout = 0;
         $bitOffset = 0;
-        
+
         foreach ($quadrants as $quad) {
             // Get dominant color characteristic (simplified)
             $stats = $quad->stats();
             $meanR = $stats->getpoint(5, 1)[0];
             $meanG = $stats->getpoint(5, 2)[0];
             $meanB = $stats->getpoint(5, 3)[0];
-            
+
             // Encode as 2-bit color dominance
             $dominance = 0;
             if ($meanR > $meanG && $meanR > $meanB) {
@@ -415,11 +426,11 @@ class MashedHashStrategy extends AbstractHashStrategy
             } elseif ($meanB > $meanR && $meanB > $meanG) {
                 $dominance = 3; // Blue dominant
             }
-            
+
             $layout |= ($dominance << $bitOffset);
             $bitOffset += 2;
         }
-        
+
         return $layout;
     }
 
@@ -430,14 +441,14 @@ class MashedHashStrategy extends AbstractHashStrategy
     {
         $gray = $this->convertToGrayscale($image);
         $stats = $gray->stats();
-        
+
         $mean = $stats->getpoint(5, 1)[0];      // Mean brightness
         $deviation = $stats->getpoint(6, 1)[0]; // Std deviation
-        
+
         // Encode mean (4 bits) and variance (4 bits)
-        $meanBits = (int)min(15, $mean / 17);      // 0-255 -> 0-15
-        $devBits = (int)min(15, $deviation / 6.5); // 0-100 -> 0-15
-        
+        $meanBits = (int) min(15, $mean / 17);      // 0-255 -> 0-15
+        $devBits = (int) min(15, $deviation / 6.5); // 0-100 -> 0-15
+
         return ($meanBits << 4) | $devBits;
     }
 
@@ -447,22 +458,22 @@ class MashedHashStrategy extends AbstractHashStrategy
     private function computeTextureFeatures(VipsImage $image): int
     {
         $gray = $this->convertToGrayscale($image);
-        
+
         // Compute directional gradients
         $dx = $gray->sobel()->extract_band(0);
         $dy = $gray->sobel()->rot90()->extract_band(0);
-        
+
         // Calculate texture metrics
         $dxStats = $dx->stats();
         $dyStats = $dy->stats();
-        
+
         $horizontalTexture = $dxStats->getpoint(5, 1)[0]; // Mean horizontal gradient
         $verticalTexture = $dyStats->getpoint(5, 1)[0];   // Mean vertical gradient
-        
+
         // Encode as 4 bits each
-        $hBits = (int)min(15, $horizontalTexture / 3);
-        $vBits = (int)min(15, $verticalTexture / 3);
-        
+        $hBits = (int) min(15, $horizontalTexture / 3);
+        $vBits = (int) min(15, $verticalTexture / 3);
+
         return ($hBits << 4) | $vBits;
     }
 
@@ -473,15 +484,15 @@ class MashedHashStrategy extends AbstractHashStrategy
     {
         // Simplified: use color variance as proxy for color count
         $stats = $image->stats();
-        
+
         $rDev = $stats->getpoint(6, 1)[0];
         $gDev = $stats->getpoint(6, 2)[0];
         $bDev = $stats->getpoint(6, 3)[0];
-        
+
         $totalDev = $rDev + $gDev + $bDev;
-        
+
         // Map to dominant color count estimate
-        return match(true) {
+        return match (true) {
             $totalDev < 30 => 1,   // Very uniform
             $totalDev < 60 => 2,   // 2-3 dominant colors
             $totalDev < 90 => 4,   // 4-5 colors
@@ -497,37 +508,37 @@ class MashedHashStrategy extends AbstractHashStrategy
     private function computeSpecialIndicators(VipsImage $image): int
     {
         $indicators = 0;
-        
+
         // Bit 0: High frequency content (possible text)
         $gray = $this->convertToGrayscale($image);
-        
+
         // Create Laplacian mask for edge detection
         $mask = VipsImage::newFromArray([
             [-1, -1, -1],
             [-1,  8, -1],
-            [-1, -1, -1]
+            [-1, -1, -1],
         ]);
-        
+
         $laplacian = $gray->conv($mask);
         $highFreqStats = $laplacian->stats();
         $highFreq = $highFreqStats->getpoint(5, 1)[0];
-        
+
         if ($highFreq > 20) {
             $indicators |= 1;
         }
-        
+
         // Bit 1: Large uniform regions
         $devStats = $image->stats();
-        $avgDev = ($devStats->getpoint(6, 1)[0] + 
-                   $devStats->getpoint(6, 2)[0] + 
+        $avgDev = ($devStats->getpoint(6, 1)[0] +
+                   $devStats->getpoint(6, 2)[0] +
                    $devStats->getpoint(6, 3)[0]) / 3;
-        
+
         if ($avgDev < 15) {
             $indicators |= 2;
         }
-        
+
         // Bits 2-3: Reserved for future use
-        
+
         return $indicators;
     }
 
@@ -537,24 +548,24 @@ class MashedHashStrategy extends AbstractHashStrategy
     private function packComponents(array $components): int
     {
         $hash = 0;
-        
+
         // Pack each component at its designated bit position
         $hash |= ($components['colorfulness'] & self::COLORFULNESS_MASK) << self::COLORFULNESS_BITS;
         $hash |= ($components['edgeDensity'] & self::EDGE_DENSITY_MASK) << self::EDGE_DENSITY_BITS;
         $hash |= ($components['entropy'] & self::ENTROPY_MASK) << self::ENTROPY_BITS;
         $hash |= ($components['aspectRatio'] & self::ASPECT_RATIO_MASK) << self::ASPECT_RATIO_BITS;
-        
+
         if ($components['hasBorder']) {
             $hash |= 1 << self::BORDER_FLAG_BIT;
         }
-        
+
         $hash |= ($components['colorDistribution'] & self::COLOR_DIST_MASK) << self::COLOR_DIST_BITS;
         $hash |= ($components['spatialLayout'] & self::SPATIAL_LAYOUT_MASK) << self::SPATIAL_LAYOUT_BITS;
         $hash |= ($components['brightness'] & self::BRIGHTNESS_MASK) << self::BRIGHTNESS_BITS;
         $hash |= ($components['texture'] & self::TEXTURE_MASK) << self::TEXTURE_BITS;
         $hash |= ($components['dominantColors'] & self::DOMINANT_COLOR_MASK) << self::DOMINANT_COLOR_BITS;
         $hash |= ($components['special'] & self::SPECIAL_MASK) << self::SPECIAL_BITS;
-        
+
         return $hash;
     }
 }

@@ -2,8 +2,8 @@
 
 declare(strict_types=1);
 
-use LegitPHP\HashMoney\MashedHash;
 use LegitPHP\HashMoney\HashValue;
+use LegitPHP\HashMoney\MashedHash;
 
 beforeEach(function () {
     MashedHash::configure(['cores' => 2]);
@@ -50,10 +50,10 @@ test('detects different aspect ratios', function () {
     // We'll need to create test images with different aspect ratios
     // For now, test that aspect ratio bits are set
     $hash = MashedHash::hashFromFile(__DIR__.'/../images/cat1.jpg');
-    
+
     // Extract aspect ratio bits (12-14)
     $aspectRatio = ($hash->getValue() >> 12) & 0x7;
-    
+
     expect($aspectRatio)->toBeGreaterThanOrEqual(0);
     expect($aspectRatio)->toBeLessThanOrEqual(7);
 });

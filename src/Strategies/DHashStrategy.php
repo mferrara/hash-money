@@ -51,7 +51,6 @@ class DHashStrategy extends AbstractHashStrategy
         return new HashValue($hashValue, $bits, $this->getAlgorithmName());
     }
 
-
     private function generateDHash(array $pixels, int $width, int $height, int $bits): int
     {
         $hash = 0;
