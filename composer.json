@@ -7,6 +7,8 @@
         "image",
         "perceptual-hash",
         "phash",
+        "dhash",
+        "difference-hash",
         "vips",
         "libvips",
         "image-processing",

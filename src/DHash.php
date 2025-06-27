@@ -5,22 +5,23 @@ declare(strict_types=1);
 namespace LegitPHP\HashMoney;
 
 use Jcupitt\Vips\Image as VipsImage;
-use LegitPHP\HashMoney\Strategies\PerceptualHashStrategy;
+use LegitPHP\HashMoney\Strategies\DHashStrategy;
 
 /**
- * Perceptual Hash facade for backward compatibility and simplified API.
+ * DHash (Difference Hash) facade for simplified API.
  *
- * This class provides a static interface to the perceptual hash algorithm,
- * delegating actual implementation to PerceptualHashStrategy.
+ * DHash is a gradient-based perceptual hash algorithm that compares
+ * adjacent pixels to generate a hash. It's faster than DCT-based
+ * perceptual hashing but may be slightly less accurate.
  */
-class PerceptualHash
+class DHash
 {
-    private static ?PerceptualHashStrategy $strategy = null;
+    private static ?DHashStrategy $strategy = null;
 
-    private static function getStrategy(): PerceptualHashStrategy
+    private static function getStrategy(): DHashStrategy
     {
         if (self::$strategy === null) {
-            self::$strategy = new PerceptualHashStrategy;
+            self::$strategy = new DHashStrategy;
         }
 
         return self::$strategy;
