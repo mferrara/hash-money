@@ -58,10 +58,11 @@ class DHashStrategy extends AbstractHashStrategy
         $bit = 0;
 
         // Compare adjacent pixels horizontally
+        // Following dhash-vips convention: bit is 1 if pixel gets darker (gradient decreasing)
         for ($y = 0; $y < $height && $bit < $bits; $y++) {
             for ($x = 0; $x < $width - 1 && $bit < $bits; $x++) {
-                // Set bit to 1 if left pixel is brighter than right pixel
-                if ($pixels[$y][$x] > $pixels[$y][$x + 1]) {
+                // Set bit to 1 if pixel gets darker (right pixel is darker than left)
+                if ($pixels[$y][$x] < $pixels[$y][$x + 1]) {
                     $hash |= (1 << ($bits - 1 - $bit));
                 }
                 $bit++;
