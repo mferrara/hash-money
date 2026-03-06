@@ -47,6 +47,8 @@ Color distribution-based algorithm that captures global color patterns in images
 - Quantizes colors into bins (8×4×4 by default)
 - Excellent for detecting color-shifted or filtered variants
 - Complements spatial hashes by focusing on color information
+- **Enhanced bit distribution**: Now uses all 64 bits effectively with proper mixing
+- **Improved uniqueness**: Fixed algorithm provides much better hash diversity
 
 ### MashedHash 🥔
 A comprehensive image fingerprint that "mashes" together multiple image characteristics into a single 64-bit hash. This algorithm analyzes 11 different aspects of an image to create a rich signature that captures both content and style.
@@ -160,7 +162,7 @@ Smaller hash sizes are faster to compute and compare but may produce more false 
 ### Type Safety
 
 ```php
-// The new API returns HashValue objects with type safety
+// The API returns HashValue objects with type safety
 $pHash = PerceptualHash::hashFromFile('image.jpg');
 $dHash = DHash::hashFromFile('image.jpg');
 
@@ -176,6 +178,16 @@ echo $pHash->getValue();     // Raw integer value
 echo $pHash->getBits();      // 64
 echo $pHash->getAlgorithm(); // "perceptual"
 echo $pHash->toHex();        // Hexadecimal representation
+
+// Create typed HashValue instances from various sources
+$fromHex = HashValue::fromHex('a1b2c3d4', 32, 'perceptual');
+$fromBinary = HashValue::fromBinary('10101010', 'dhash');
+$fromBase64 = HashValue::fromBase64('EjRWeQ==', 32, 'color-histogram');
+
+// Type safety is maintained across all operations
+if ($pHash->isCompatibleWith($fromHex)) {
+    $distance = $pHash->hammingDistance($fromHex);
+}
 ```
 
 ### Configure VIPS
@@ -209,27 +221,34 @@ The Hamming distance between two hashes indicates how similar the images are.
 
 ### Working with Hash Values
 
+The `HashValue` class provides a rich API for working with hash results:
+
 ```php
 use LegitPHP\HashMoney\HashValue;
+use LegitPHP\HashMoney\PerceptualHash;
 
 $hash = PerceptualHash::hashFromFile('image.jpg');
 
-// Get hash information
+// Basic information
 $value = $hash->getValue();        // Raw integer value
 $hex = $hash->toHex();            // Hex representation (e.g., "a1b2c3d4e5f6")
 $binary = $hash->toBinary();      // Binary string (e.g., "101010110010...")
 $bits = $hash->getBits();         // Size in bits (8, 16, 32, or 64)
-$algorithm = $hash->getAlgorithm(); // Algorithm name ("perceptual" or "dhash")
+$algorithm = $hash->getAlgorithm(); // Algorithm name
 
-// Compare hashes
+// Additional representations
+$base64 = $hash->toBase64();           // Base64 encoding
+$urlSafe = $hash->toUrlSafeBase64();  // URL-safe base64
+$string = (string) $hash;             // Converts to hex
+
+// Direct comparison
 if ($hash1->equals($hash2)) {
     echo "Exact match!";
 }
 
-if ($hash1->isCompatibleWith($hash2)) {
-    $distance = PerceptualHash::distance($hash1, $hash2);
-    echo "Distance: $distance";
-}
+// Calculate distance directly
+$distance = $hash1->hammingDistance($hash2);
+echo "Images differ by $distance bits";
 ```
 
 ### Batch Processing
@@ -272,6 +291,225 @@ DHash::configure([
 // Process from memory to avoid disk I/O
 $imageData = file_get_contents('large-image.jpg');
 $hash = PerceptualHash::hashFromString($imageData);
+```
+
+### Enhanced HashValue Features
+
+The `HashValue` class includes advanced features for flexible hash manipulation and storage:
+
+#### Factory Methods and Serialization
+
+Create HashValue objects from various formats:
+
+```php
+use LegitPHP\HashMoney\HashValue;
+
+// Create from hexadecimal string
+$fromHex = HashValue::fromHex('a1b2c3d4e5f6', 64, 'perceptual');
+$fromHex = HashValue::fromHex('0xA1B2C3D4E5F6', 64, 'perceptual'); // With prefix
+
+// Create from binary string
+$fromBinary = HashValue::fromBinary('10101010', 'dhash'); // Auto-detects 8-bit
+
+// Create from base64
+$fromBase64 = HashValue::fromBase64('EjRWeJCrze8=', 64, 'perceptual');
+
+// Serialize to different formats
+$hash = PerceptualHash::hashFromFile('image.jpg');
+$json = json_encode($hash); // Implements JsonSerializable
+$array = $hash->toArray();  // Convert to array
+
+// Restore from serialized data
+$decoded = json_decode($json, true);
+$restored = HashValue::fromArray($decoded);
+```
+
+#### Metadata Support
+
+Attach metadata to hash values for richer data management:
+
+```php
+// Create hash with metadata
+$hash = PerceptualHash::hashFromFile('photo.jpg');
+$hashWithMeta = $hash->withMetadata([
+    'filename' => 'photo.jpg',
+    'timestamp' => time(),
+    'source' => 'user_upload',
+    'quality_score' => 0.95
+]);
+
+// Access metadata
+$allMeta = $hashWithMeta->getMetadata();
+$filename = $hashWithMeta->getMetadata('filename');
+
+// Metadata persists through serialization
+$json = json_encode($hashWithMeta->toArray());
+$restored = HashValue::fromArray(json_decode($json, true));
+echo $restored->getMetadata('filename'); // 'photo.jpg'
+```
+
+#### Bitwise Analysis
+
+Examine hash properties at the bit level:
+
+```php
+$hash = DHash::hashFromFile('image.jpg', 64);
+
+// Check individual bits
+for ($i = 0; $i < 8; $i++) {
+    if ($hash->getBit($i)) {
+        echo "Bit $i is set\n";
+    }
+}
+
+// Count set bits (useful for hash analysis)
+$setBits = $hash->countSetBits();
+$density = $setBits / $hash->getBits(); // Bit density ratio
+
+// Get normalized value (0.0 to 1.0)
+$normalized = $hash->normalized();
+```
+
+#### Advanced Comparisons
+
+Built-in methods for sophisticated hash comparison:
+
+```php
+$hash1 = PerceptualHash::hashFromFile('original.jpg');
+$hash2 = PerceptualHash::hashFromFile('modified.jpg');
+
+// Direct Hamming distance calculation
+$distance = $hash1->hammingDistance($hash2);
+
+// Calculate similarity percentage
+$maxDistance = $hash1->getBits();
+$similarity = (1 - ($distance / $maxDistance)) * 100;
+echo "Images are {$similarity}% similar";
+
+// Use normalized values for threshold comparisons
+if ($hash1->normalized() > 0.5 && $hash2->normalized() > 0.5) {
+    echo "Both images have high bit density";
+}
+```
+
+### Real-World Examples
+
+#### Database Storage Pattern
+
+Store and retrieve hashes efficiently:
+
+```php
+// Storing in database
+$hash = MashedHash::hashFromFile('product-image.jpg');
+$data = [
+    'image_id' => 12345,
+    'hash_value' => $hash->getValue(),      // Store as BIGINT
+    'hash_hex' => $hash->toHex(),          // Store as CHAR(16) for 64-bit
+    'algorithm' => $hash->getAlgorithm(),   // Store algorithm type
+    'metadata' => json_encode([
+        'original_name' => 'product-image.jpg',
+        'processed_at' => date('Y-m-d H:i:s')
+    ])
+];
+
+// Retrieving from database
+$row = $db->fetchRow("SELECT * FROM image_hashes WHERE image_id = ?", [12345]);
+$hash = new HashValue(
+    $row['hash_value'],
+    64,
+    $row['algorithm'],
+    json_decode($row['metadata'], true)
+);
+
+// Or use hex value
+$hash = HashValue::fromHex($row['hash_hex'], 64, $row['algorithm']);
+```
+
+#### API Integration
+
+Send and receive hashes via APIs:
+
+```php
+// Sending hash data
+$hash = ColorHistogramHash::hashFromFile('image.jpg');
+$apiPayload = [
+    'image_hash' => $hash->toUrlSafeBase64(), // URL-safe for GET requests
+    'algorithm' => $hash->getAlgorithm(),
+    'bits' => $hash->getBits()
+];
+
+$response = $httpClient->post('/api/check-duplicate', [
+    'json' => $apiPayload
+]);
+
+// Receiving and reconstructing
+$data = json_decode($response->getBody(), true);
+$receivedHash = HashValue::fromBase64(
+    $data['image_hash'],
+    $data['bits'],
+    $data['algorithm']
+);
+```
+
+#### Duplicate Detection System
+
+Build a complete duplicate detection workflow:
+
+```php
+class ImageDuplicateDetector 
+{
+    private array $hashDatabase = [];
+    
+    public function addImage(string $path): void 
+    {
+        // Generate multiple hash types for robust matching
+        $pHash = PerceptualHash::hashFromFile($path);
+        $dHash = DHash::hashFromFile($path);
+        $mHash = MashedHash::hashFromFile($path);
+        
+        // Store with metadata
+        $this->hashDatabase[$path] = [
+            'perceptual' => $pHash->withMetadata(['path' => $path]),
+            'dhash' => $dHash->withMetadata(['path' => $path]),
+            'mashed' => $mHash->withMetadata(['path' => $path]),
+            'added_at' => time()
+        ];
+    }
+    
+    public function findDuplicates(string $imagePath, int $threshold = 10): array 
+    {
+        $candidates = [];
+        $testHashes = [
+            'perceptual' => PerceptualHash::hashFromFile($imagePath),
+            'dhash' => DHash::hashFromFile($imagePath),
+            'mashed' => MashedHash::hashFromFile($imagePath)
+        ];
+        
+        foreach ($this->hashDatabase as $storedPath => $storedHashes) {
+            $scores = [
+                'perceptual' => $testHashes['perceptual']->hammingDistance($storedHashes['perceptual']),
+                'dhash' => $testHashes['dhash']->hammingDistance($storedHashes['dhash']),
+                'mashed' => $testHashes['mashed']->hammingDistance($storedHashes['mashed'])
+            ];
+            
+            // Weighted scoring
+            $totalScore = ($scores['perceptual'] * 2 + $scores['dhash'] + $scores['mashed']) / 4;
+            
+            if ($totalScore <= $threshold) {
+                $candidates[] = [
+                    'path' => $storedPath,
+                    'score' => $totalScore,
+                    'individual_scores' => $scores
+                ];
+            }
+        }
+        
+        // Sort by similarity
+        usort($candidates, fn($a, $b) => $a['score'] <=> $b['score']);
+        
+        return $candidates;
+    }
+}
 ```
 
 
