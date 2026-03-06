@@ -121,7 +121,7 @@ test('distance calculation throws exception for incompatible hashes', function (
     $perceptualHash = \LegitPHP\HashMoney\PerceptualHash::hashFromFile(__DIR__.'/../images/cat1.jpg');
 
     MashedHash::distance($mashedHash, $perceptualHash);
-})->throws(InvalidArgumentException::class, 'Cannot compare hashes: algorithm mismatch');
+})->throws(InvalidArgumentException::class, 'Cannot calculate Hamming distance: incompatible hashes');
 
 test('handles images with alpha channel', function () {
     // Create a test image with alpha channel

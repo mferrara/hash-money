@@ -91,27 +91,8 @@ abstract class AbstractHashStrategy implements HashStrategy
 
     public function distance(HashValue $hash1, HashValue $hash2): int
     {
-        if (! $hash1->isCompatibleWith($hash2)) {
-            throw new InvalidArgumentException(sprintf(
-                'Cannot compare hashes: algorithm mismatch (%s vs %s) or bit size mismatch (%d vs %d)',
-                $hash1->getAlgorithm(),
-                $hash2->getAlgorithm(),
-                $hash1->getBits(),
-                $hash2->getBits()
-            ));
-        }
-
-        $diff = $hash1->getValue() ^ $hash2->getValue();
-        $distance = 0;
-
-        // Count set bits (Hamming distance)
-        for ($i = 0; $i < $hash1->getBits(); $i++) {
-            if (($diff >> $i) & 1) {
-                $distance++;
-            }
-        }
-
-        return $distance;
+        // Delegate to HashValue's built-in hammingDistance method
+        return $hash1->hammingDistance($hash2);
     }
 
     protected function getNumCores(): int

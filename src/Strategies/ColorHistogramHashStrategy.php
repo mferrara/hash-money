@@ -235,101 +235,170 @@ class ColorHistogramHashStrategy extends AbstractHashStrategy
         $hash = 0;
         $totalBins = count($histogram);
 
-        // For grayscale images, set special marker bits
+        // For grayscale images, use a special encoding
         if ($this->isGrayscale) {
-            // Set bits 60-63 to indicate this is a grayscale image (pattern: 1111)
-            $hash |= (0xF << 60);
+            // Set bit 63 to indicate this is a grayscale image
+            $hash |= (1 << 63);
 
-            // Use bits 4-63 for brightness distribution
-            $bitOffset = 4;
-
-            // Only use value bins for grayscale
+            // For grayscale, focus on value distribution
             $valueBins = $this->vBins;
-            for ($v = 0; $v < $valueBins && $bitOffset < 64; $v++) {
-                $binSum = 0;
-                // Sum all bins with this value level
-                for ($i = 0; $i < $totalBins; $i++) {
-                    if ($i % $this->vBins === $v) {
-                        $binSum += $histogram[$i];
-                    }
-                }
-
-                // Encode value distribution
+            $valueDistribution = array_fill(0, $valueBins, 0);
+            
+            // Sum up bins by value level
+            for ($i = 0; $i < $totalBins; $i++) {
+                $vBin = $i % $this->vBins;
+                $valueDistribution[$vBin] += $histogram[$i];
+            }
+            
+            // Encode value distribution across bits 0-31
+            for ($v = 0; $v < $valueBins && $v < 32; $v++) {
                 $threshold = 1.0 / $valueBins;
-                if ($binSum > $threshold * 0.5) {
-                    $hash |= (1 << $bitOffset);
+                if ($valueDistribution[$v] > $threshold * 0.5) {
+                    $hash |= (1 << $v);
                 }
-                $bitOffset++;
+                // Also encode relative magnitude in upper bits
+                $magnitude = min((int)($valueDistribution[$v] * 8), 7);
+                $hash |= ($magnitude << (32 + $v * 2));
             }
 
-            return $hash;
+            return $this->mixBits($hash);
         }
 
-        // Original color encoding for color images
-        // Ensure bits 60-63 are NOT set for color images
-        // Calculate mean value for thresholding
-        $mean = array_sum($histogram) / $totalBins;
-
-        // Group bins by color characteristics
-        // We'll encode presence of significant colors in different regions
-        $bitsPerRegion = 16;
-        $regions = [
-            'hue_low' => [],     // Low hue values (reds)
-            'hue_mid' => [],     // Mid hue values (greens)
-            'hue_high' => [],    // High hue values (blues)
-            'saturation' => [],  // Saturation characteristics
-        ];
-
-        // Distribute bins into regions based on their position
+        // For color images: Create indexed bins with their values
+        $indexedBins = [];
         for ($i = 0; $i < $totalBins; $i++) {
-            $hBin = (int) ($i / ($this->sBins * $this->vBins));
-            $sBin = (int) (($i % ($this->sBins * $this->vBins)) / $this->vBins);
+            if ($histogram[$i] > 0) {
+                $indexedBins[] = [
+                    'index' => $i,
+                    'value' => $histogram[$i],
+                    'hBin' => (int) ($i / ($this->sBins * $this->vBins)),
+                    'sBin' => (int) (($i % ($this->sBins * $this->vBins)) / $this->vBins),
+                    'vBin' => $i % $this->vBins,
+                ];
+            }
+        }
 
-            if ($hBin < $this->hBins / 3) {
-                $regions['hue_low'][] = ['index' => $i, 'value' => $histogram[$i]];
-            } elseif ($hBin < 2 * $this->hBins / 3) {
-                $regions['hue_mid'][] = ['index' => $i, 'value' => $histogram[$i]];
+        // Sort by value (most significant bins first)
+        usort($indexedBins, function ($a, $b) {
+            return $b['value'] <=> $a['value'];
+        });
+
+        // Method 1: Encode top N bins' indices (bits 0-31)
+        $topN = min(32, count($indexedBins));
+        for ($i = 0; $i < $topN; $i++) {
+            $bin = $indexedBins[$i];
+            // Use bin index modulo 32 to determine which bit to set
+            $bitPos = $bin['index'] % 32;
+            $hash |= (1 << $bitPos);
+        }
+
+        // Method 2: Encode color channel dominance (bits 32-47)
+        $hueSum = [0, 0, 0]; // Low, mid, high
+        $satSum = [0, 0]; // Low, high
+        $valSum = [0, 0]; // Low, high
+        
+        foreach ($indexedBins as $bin) {
+            // Hue distribution
+            if ($bin['hBin'] < $this->hBins / 3) {
+                $hueSum[0] += $bin['value'];
+            } elseif ($bin['hBin'] < 2 * $this->hBins / 3) {
+                $hueSum[1] += $bin['value'];
             } else {
-                $regions['hue_high'][] = ['index' => $i, 'value' => $histogram[$i]];
+                $hueSum[2] += $bin['value'];
             }
-
-            // Also track saturation separately
-            if ($sBin < $this->sBins / 2) {
-                $regions['saturation'][] = ['index' => $i, 'value' => $histogram[$i]];
+            
+            // Saturation distribution
+            if ($bin['sBin'] < $this->sBins / 2) {
+                $satSum[0] += $bin['value'];
+            } else {
+                $satSum[1] += $bin['value'];
             }
-        }
-
-        // Encode each region into the hash
-        $bitOffset = 0;
-        foreach ($regions as $regionName => $regionBins) {
-            // Sort bins in this region by value
-            usort($regionBins, function ($a, $b) {
-                return $b['value'] <=> $a['value'];
-            });
-
-            // Encode top bins from this region
-            $regionBitsUsed = 0;
-            foreach ($regionBins as $bin) {
-                if ($regionBitsUsed >= $bitsPerRegion || $bitOffset >= 64) {
-                    break;
-                }
-
-                // Set bit if this bin has significant value
-                if ($bin['value'] > $mean * 0.5) {
-                    $hash |= (1 << $bitOffset);
-                }
-
-                $bitOffset++;
-                $regionBitsUsed++;
-            }
-
-            // Skip to next region's bit offset
-            $bitOffset = (($bitOffset / $bitsPerRegion) + 1) * $bitsPerRegion;
-            if ($bitOffset >= 64) {
-                break;
+            
+            // Value distribution
+            if ($bin['vBin'] < $this->vBins / 2) {
+                $valSum[0] += $bin['value'];
+            } else {
+                $valSum[1] += $bin['value'];
             }
         }
+        
+        // Encode channel dominance
+        $bitOffset = 32;
+        
+        // Hue dominance (3 bits)
+        $maxHue = max($hueSum);
+        for ($i = 0; $i < 3; $i++) {
+            if ($hueSum[$i] > $maxHue * 0.5) {
+                $hash |= (1 << ($bitOffset + $i));
+            }
+        }
+        $bitOffset += 3;
+        
+        // Saturation dominance (2 bits)
+        if ($satSum[0] > $satSum[1]) {
+            $hash |= (1 << $bitOffset);
+        }
+        if ($satSum[1] > $satSum[0] * 0.7) {
+            $hash |= (1 << ($bitOffset + 1));
+        }
+        $bitOffset += 2;
+        
+        // Value dominance (2 bits)
+        if ($valSum[0] > $valSum[1]) {
+            $hash |= (1 << $bitOffset);
+        }
+        if ($valSum[1] > $valSum[0] * 0.7) {
+            $hash |= (1 << ($bitOffset + 1));
+        }
 
+        // Method 3: Statistical features (bits 48-63)
+        // Calculate and encode statistical properties
+        $nonZeroBins = count($indexedBins);
+        $maxBinValue = $indexedBins[0]['value'] ?? 0;
+        $totalValue = array_sum(array_column($indexedBins, 'value'));
+        
+        // Encode number of active bins (6 bits)
+        $activeBinsEncoded = min($nonZeroBins, 63);
+        $hash |= ($activeBinsEncoded << 48);
+        
+        // Encode concentration (how concentrated the histogram is)
+        if ($maxBinValue > $totalValue * 0.5) {
+            $hash |= (1 << 54); // Highly concentrated
+        } elseif ($maxBinValue > $totalValue * 0.25) {
+            $hash |= (1 << 55); // Moderately concentrated
+        }
+        
+        // Encode diversity
+        if ($nonZeroBins > $totalBins * 0.75) {
+            $hash |= (1 << 56); // High diversity
+        } elseif ($nonZeroBins > $totalBins * 0.5) {
+            $hash |= (1 << 57); // Medium diversity
+        }
+
+        // Apply bit mixing for better distribution
+        return $this->mixBits($hash);
+    }
+
+    /**
+     * Mix bits for better distribution using MurmurHash-inspired mixing.
+     */
+    private function mixBits(int $hash): int
+    {
+        // Simplified bit mixing for PHP to avoid overflow issues
+        // Using XOR and rotation operations instead of multiplication
+        
+        // Mix high bits with low bits
+        $hash ^= ($hash >> 33);
+        
+        // Rotate and mix
+        $hash = (($hash << 13) | ($hash >> 51)) ^ $hash;
+        $hash = (($hash << 17) | ($hash >> 47)) ^ $hash;
+        
+        // Final mix
+        $hash ^= ($hash >> 32);
+        $hash = (($hash << 5) | ($hash >> 59)) ^ $hash;
+        $hash ^= ($hash >> 29);
+        
         return $hash;
     }
 }
