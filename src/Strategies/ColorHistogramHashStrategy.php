@@ -243,13 +243,13 @@ class ColorHistogramHashStrategy extends AbstractHashStrategy
             // For grayscale, focus on value distribution
             $valueBins = $this->vBins;
             $valueDistribution = array_fill(0, $valueBins, 0);
-            
+
             // Sum up bins by value level
             for ($i = 0; $i < $totalBins; $i++) {
                 $vBin = $i % $this->vBins;
                 $valueDistribution[$vBin] += $histogram[$i];
             }
-            
+
             // Encode value distribution across bits 0-31
             for ($v = 0; $v < $valueBins && $v < 32; $v++) {
                 $threshold = 1.0 / $valueBins;
@@ -257,7 +257,7 @@ class ColorHistogramHashStrategy extends AbstractHashStrategy
                     $hash |= (1 << $v);
                 }
                 // Also encode relative magnitude in upper bits
-                $magnitude = min((int)($valueDistribution[$v] * 8), 7);
+                $magnitude = min((int) ($valueDistribution[$v] * 8), 7);
                 $hash |= ($magnitude << (32 + $v * 2));
             }
 
@@ -296,7 +296,7 @@ class ColorHistogramHashStrategy extends AbstractHashStrategy
         $hueSum = [0, 0, 0]; // Low, mid, high
         $satSum = [0, 0]; // Low, high
         $valSum = [0, 0]; // Low, high
-        
+
         foreach ($indexedBins as $bin) {
             // Hue distribution
             if ($bin['hBin'] < $this->hBins / 3) {
@@ -306,14 +306,14 @@ class ColorHistogramHashStrategy extends AbstractHashStrategy
             } else {
                 $hueSum[2] += $bin['value'];
             }
-            
+
             // Saturation distribution
             if ($bin['sBin'] < $this->sBins / 2) {
                 $satSum[0] += $bin['value'];
             } else {
                 $satSum[1] += $bin['value'];
             }
-            
+
             // Value distribution
             if ($bin['vBin'] < $this->vBins / 2) {
                 $valSum[0] += $bin['value'];
@@ -321,10 +321,10 @@ class ColorHistogramHashStrategy extends AbstractHashStrategy
                 $valSum[1] += $bin['value'];
             }
         }
-        
+
         // Encode channel dominance
         $bitOffset = 32;
-        
+
         // Hue dominance (3 bits)
         $maxHue = max($hueSum);
         for ($i = 0; $i < 3; $i++) {
@@ -333,7 +333,7 @@ class ColorHistogramHashStrategy extends AbstractHashStrategy
             }
         }
         $bitOffset += 3;
-        
+
         // Saturation dominance (2 bits)
         if ($satSum[0] > $satSum[1]) {
             $hash |= (1 << $bitOffset);
@@ -342,7 +342,7 @@ class ColorHistogramHashStrategy extends AbstractHashStrategy
             $hash |= (1 << ($bitOffset + 1));
         }
         $bitOffset += 2;
-        
+
         // Value dominance (2 bits)
         if ($valSum[0] > $valSum[1]) {
             $hash |= (1 << $bitOffset);
@@ -356,18 +356,18 @@ class ColorHistogramHashStrategy extends AbstractHashStrategy
         $nonZeroBins = count($indexedBins);
         $maxBinValue = $indexedBins[0]['value'] ?? 0;
         $totalValue = array_sum(array_column($indexedBins, 'value'));
-        
+
         // Encode number of active bins (6 bits)
         $activeBinsEncoded = min($nonZeroBins, 63);
         $hash |= ($activeBinsEncoded << 48);
-        
+
         // Encode concentration (how concentrated the histogram is)
         if ($maxBinValue > $totalValue * 0.5) {
             $hash |= (1 << 54); // Highly concentrated
         } elseif ($maxBinValue > $totalValue * 0.25) {
             $hash |= (1 << 55); // Moderately concentrated
         }
-        
+
         // Encode diversity
         if ($nonZeroBins > $totalBins * 0.75) {
             $hash |= (1 << 56); // High diversity
@@ -386,19 +386,19 @@ class ColorHistogramHashStrategy extends AbstractHashStrategy
     {
         // Simplified bit mixing for PHP to avoid overflow issues
         // Using XOR and rotation operations instead of multiplication
-        
+
         // Mix high bits with low bits
         $hash ^= ($hash >> 33);
-        
+
         // Rotate and mix
         $hash = (($hash << 13) | ($hash >> 51)) ^ $hash;
         $hash = (($hash << 17) | ($hash >> 47)) ^ $hash;
-        
+
         // Final mix
         $hash ^= ($hash >> 32);
         $hash = (($hash << 5) | ($hash >> 59)) ^ $hash;
         $hash ^= ($hash >> 29);
-        
+
         return $hash;
     }
 }

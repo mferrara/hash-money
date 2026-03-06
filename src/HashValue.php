@@ -19,7 +19,7 @@ use JsonSerializable;
  * $hash = new HashValue(0x1234567890ABCDEF, 64, 'perceptual');
  * echo $hash->toHex(); // "1234567890abcdef"
  * echo $hash->toBase64(); // "EjRWeJCr3v8="
- * 
+ *
  * // Factory methods
  * $fromHex = HashValue::fromHex('1234567890abcdef', 64, 'perceptual');
  * $fromBinary = HashValue::fromBinary('1010101010101010', 'dhash');
@@ -28,13 +28,13 @@ use JsonSerializable;
 final class HashValue implements JsonSerializable
 {
     private const SUPPORTED_BITS = [8, 16, 32, 64];
-    
+
     /** @var string|null Cached hex representation */
     private ?string $hexCache = null;
-    
+
     /** @var string|null Cached binary representation */
     private ?string $binaryCache = null;
-    
+
     /** @var array Optional metadata for storing additional information */
     private array $metadata;
 
@@ -99,7 +99,7 @@ final class HashValue implements JsonSerializable
                 $this->hexCache = sprintf('%0'.$hexDigits.'x', $this->value);
             }
         }
-        
+
         return $this->hexCache;
     }
 
@@ -115,7 +115,7 @@ final class HashValue implements JsonSerializable
                 $this->binaryCache = sprintf('%0'.$this->bits.'b', $this->value);
             }
         }
-        
+
         return $this->binaryCache;
     }
 
@@ -131,26 +131,26 @@ final class HashValue implements JsonSerializable
         return $this->algorithm === $other->algorithm
             && $this->bits === $other->bits;
     }
-    
+
     /**
      * Create a HashValue from a hexadecimal string.
      *
-     * @param string $hex The hexadecimal string (with or without 0x prefix)
-     * @param int $bits The bit size of the hash
-     * @param string $algorithm The algorithm name
-     * @param array $metadata Optional metadata
-     * @return self
+     * @param  string  $hex  The hexadecimal string (with or without 0x prefix)
+     * @param  int  $bits  The bit size of the hash
+     * @param  string  $algorithm  The algorithm name
+     * @param  array  $metadata  Optional metadata
+     *
      * @throws InvalidArgumentException If the hex string is invalid
      */
     public static function fromHex(string $hex, int $bits, string $algorithm, array $metadata = []): self
     {
         $hex = ltrim($hex, '0x');
         $hex = ltrim($hex, '0X');
-        
-        if (!ctype_xdigit($hex)) {
+
+        if (! ctype_xdigit($hex)) {
             throw new InvalidArgumentException('Invalid hexadecimal string: must contain only hex digits');
         }
-        
+
         $expectedLength = $bits / 4;
         if (strlen($hex) !== $expectedLength) {
             throw new InvalidArgumentException(
@@ -158,47 +158,47 @@ final class HashValue implements JsonSerializable
                     $expectedLength, $bits, strlen($hex))
             );
         }
-        
+
         // Handle 64-bit values specially due to PHP's signed integers
         if ($bits === 64) {
             $high = hexdec(substr($hex, 0, 8));
             $low = hexdec(substr($hex, 8, 8));
             $value = ($high << 32) | $low;
-            
+
             // Handle negative values
             if ($high >= 0x80000000) {
                 $value = $value - (1 << 64);
             }
         } else {
-            $value = (int)hexdec($hex);
+            $value = (int) hexdec($hex);
         }
-        
+
         return new self($value, $bits, $algorithm, $metadata);
     }
-    
+
     /**
      * Create a HashValue from a binary string.
      *
-     * @param string $binary The binary string (only 0 and 1 characters)
-     * @param string $algorithm The algorithm name
-     * @param array $metadata Optional metadata
-     * @return self
+     * @param  string  $binary  The binary string (only 0 and 1 characters)
+     * @param  string  $algorithm  The algorithm name
+     * @param  array  $metadata  Optional metadata
+     *
      * @throws InvalidArgumentException If the binary string is invalid
      */
     public static function fromBinary(string $binary, string $algorithm, array $metadata = []): self
     {
-        if (!preg_match('/^[01]+$/', $binary)) {
+        if (! preg_match('/^[01]+$/', $binary)) {
             throw new InvalidArgumentException('Invalid binary string: must contain only 0 and 1');
         }
-        
+
         $bits = strlen($binary);
-        if (!in_array($bits, self::SUPPORTED_BITS, true)) {
+        if (! in_array($bits, self::SUPPORTED_BITS, true)) {
             throw new InvalidArgumentException(
                 sprintf('Binary string length %d does not match a supported bit size: %s',
                     $bits, implode(', ', self::SUPPORTED_BITS))
             );
         }
-        
+
         // Handle 64-bit values specially
         if ($bits === 64) {
             $value = 0;
@@ -207,7 +207,7 @@ final class HashValue implements JsonSerializable
                     $value |= (1 << (63 - $i));
                 }
             }
-            
+
             // Handle sign bit for 64-bit values
             if ($binary[0] === '1') {
                 $value = $value - (1 << 64);
@@ -215,18 +215,18 @@ final class HashValue implements JsonSerializable
         } else {
             $value = bindec($binary);
         }
-        
+
         return new self($value, $bits, $algorithm, $metadata);
     }
-    
+
     /**
      * Create a HashValue from a base64 string.
      *
-     * @param string $base64 The base64 encoded string
-     * @param int $bits The bit size of the hash
-     * @param string $algorithm The algorithm name
-     * @param array $metadata Optional metadata
-     * @return self
+     * @param  string  $base64  The base64 encoded string
+     * @param  int  $bits  The bit size of the hash
+     * @param  string  $algorithm  The algorithm name
+     * @param  array  $metadata  Optional metadata
+     *
      * @throws InvalidArgumentException If the base64 string is invalid
      */
     public static function fromBase64(string $base64, int $bits, string $algorithm, array $metadata = []): self
@@ -235,7 +235,7 @@ final class HashValue implements JsonSerializable
         if ($decoded === false) {
             throw new InvalidArgumentException('Invalid base64 string');
         }
-        
+
         $expectedBytes = $bits / 8;
         if (strlen($decoded) !== $expectedBytes) {
             throw new InvalidArgumentException(
@@ -243,21 +243,21 @@ final class HashValue implements JsonSerializable
                     $expectedBytes, $bits, strlen($decoded))
             );
         }
-        
+
         // Convert bytes to integer
         $value = 0;
         for ($i = 0; $i < strlen($decoded); $i++) {
             $value = ($value << 8) | ord($decoded[$i]);
         }
-        
+
         // Handle sign for 64-bit values
         if ($bits === 64 && ord($decoded[0]) >= 0x80) {
             $value = $value - (1 << 64);
         }
-        
+
         return new self($value, $bits, $algorithm, $metadata);
     }
-    
+
     /**
      * Convert hash to base64 encoding.
      *
@@ -267,20 +267,20 @@ final class HashValue implements JsonSerializable
     {
         $bytes = '';
         $value = $this->value;
-        
+
         // Handle negative 64-bit values
         if ($this->bits === 64 && $value < 0) {
             $value = $value + (1 << 64);
         }
-        
+
         // Convert to bytes
         for ($i = ($this->bits / 8) - 1; $i >= 0; $i--) {
             $bytes .= chr(($value >> ($i * 8)) & 0xFF);
         }
-        
+
         return base64_encode($bytes);
     }
-    
+
     /**
      * Convert hash to URL-safe base64 encoding.
      *
@@ -290,12 +290,13 @@ final class HashValue implements JsonSerializable
     {
         return strtr($this->toBase64(), '+/', '-_');
     }
-    
+
     /**
      * Get the value of a specific bit.
      *
-     * @param int $position The bit position (0-based, from right)
+     * @param  int  $position  The bit position (0-based, from right)
      * @return bool True if bit is set, false otherwise
+     *
      * @throws InvalidArgumentException If position is out of range
      */
     public function getBit(int $position): bool
@@ -305,10 +306,10 @@ final class HashValue implements JsonSerializable
                 sprintf('Bit position %d out of range for %d-bit hash', $position, $this->bits)
             );
         }
-        
-        return (bool)(($this->value >> $position) & 1);
+
+        return (bool) (($this->value >> $position) & 1);
     }
-    
+
     /**
      * Count the number of set bits (1s) in the hash.
      *
@@ -318,49 +319,50 @@ final class HashValue implements JsonSerializable
     {
         $count = 0;
         $value = $this->value;
-        
+
         // Handle negative values for 64-bit
         if ($this->bits === 64 && $value < 0) {
             $value = $value + (1 << 64);
         }
-        
+
         for ($i = 0; $i < $this->bits; $i++) {
             if (($value >> $i) & 1) {
                 $count++;
             }
         }
-        
+
         return $count;
     }
-    
+
     /**
      * Calculate Hamming distance to another hash.
      *
-     * @param HashValue $other The other hash to compare with
+     * @param  HashValue  $other  The other hash to compare with
      * @return int The Hamming distance (number of differing bits)
+     *
      * @throws InvalidArgumentException If hashes are incompatible
      */
     public function hammingDistance(HashValue $other): int
     {
-        if (!$this->isCompatibleWith($other)) {
+        if (! $this->isCompatibleWith($other)) {
             throw new InvalidArgumentException(
                 sprintf('Cannot calculate Hamming distance: incompatible hashes (%s/%d-bit vs %s/%d-bit)',
                     $this->algorithm, $this->bits, $other->algorithm, $other->bits)
             );
         }
-        
+
         $diff = $this->value ^ $other->value;
         $distance = 0;
-        
+
         for ($i = 0; $i < $this->bits; $i++) {
             if (($diff >> $i) & 1) {
                 $distance++;
             }
         }
-        
+
         return $distance;
     }
-    
+
     /**
      * Return a normalized value between 0 and 1.
      *
@@ -369,20 +371,21 @@ final class HashValue implements JsonSerializable
     public function normalized(): float
     {
         $value = $this->value;
-        
+
         // Handle negative 64-bit values
         if ($this->bits === 64 && $value < 0) {
             $value = $value + (1 << 64);
         }
-        
+
         $maxValue = (1 << $this->bits) - 1;
+
         return $value / $maxValue;
     }
-    
+
     /**
      * Get metadata associated with this hash.
      *
-     * @param string|null $key Optional key to get specific metadata
+     * @param  string|null  $key  Optional key to get specific metadata
      * @return mixed The metadata array or specific value if key provided
      */
     public function getMetadata(?string $key = null): mixed
@@ -390,21 +393,21 @@ final class HashValue implements JsonSerializable
         if ($key === null) {
             return $this->metadata;
         }
-        
+
         return $this->metadata[$key] ?? null;
     }
-    
+
     /**
      * Create a new HashValue with updated metadata.
      *
-     * @param array $metadata The new metadata
+     * @param  array  $metadata  The new metadata
      * @return self New HashValue instance with updated metadata
      */
     public function withMetadata(array $metadata): self
     {
         return new self($this->value, $this->bits, $this->algorithm, $metadata);
     }
-    
+
     /**
      * Convert hash to array representation.
      *
@@ -420,12 +423,12 @@ final class HashValue implements JsonSerializable
             'metadata' => $this->metadata,
         ];
     }
-    
+
     /**
      * Create HashValue from array representation.
      *
-     * @param array{value?: int, bits?: int, algorithm?: string, hex?: string, metadata?: array} $data
-     * @return self
+     * @param  array{value?: int, bits?: int, algorithm?: string, hex?: string, metadata?: array}  $data
+     *
      * @throws InvalidArgumentException If required data is missing
      */
     public static function fromArray(array $data): self
@@ -438,7 +441,7 @@ final class HashValue implements JsonSerializable
                 $data['metadata'] ?? []
             );
         }
-        
+
         if (isset($data['hex']) && isset($data['bits']) && isset($data['algorithm'])) {
             return self::fromHex(
                 $data['hex'],
@@ -447,12 +450,12 @@ final class HashValue implements JsonSerializable
                 $data['metadata'] ?? []
             );
         }
-        
+
         throw new InvalidArgumentException(
             'Array must contain either (value, bits, algorithm) or (hex, bits, algorithm)'
         );
     }
-    
+
     /**
      * JsonSerializable implementation.
      *
@@ -467,11 +470,9 @@ final class HashValue implements JsonSerializable
             'hex' => $this->toHex(),
         ];
     }
-    
+
     /**
      * Get debug information for var_dump.
-     *
-     * @return array
      */
     public function __debugInfo(): array
     {
@@ -480,16 +481,14 @@ final class HashValue implements JsonSerializable
             'bits' => $this->bits,
             'algorithm' => $this->algorithm,
             'hex' => $this->toHex(),
-            'binary' => substr($this->toBinary(), 0, 32) . '...',
+            'binary' => substr($this->toBinary(), 0, 32).'...',
             'setBits' => $this->countSetBits(),
             'metadata' => $this->metadata,
         ];
     }
-    
+
     /**
      * String representation of the hash (returns hex).
-     *
-     * @return string
      */
     public function __toString(): string
     {

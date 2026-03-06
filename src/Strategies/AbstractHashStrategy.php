@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace LegitPHP\HashMoney\Strategies;
 
 use Exception;
-use InvalidArgumentException;
 use Jcupitt\Vips\Config;
 use Jcupitt\Vips\Image as VipsImage;
 use LegitPHP\HashMoney\Contracts\HashStrategy;
