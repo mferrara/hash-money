@@ -42,8 +42,6 @@ class ColorHistogramHashStrategy extends AbstractHashStrategy
 
     private int $vBins = self::DEFAULT_V_BINS;
 
-    private bool $isGrayscale = false;
-
     public function getAlgorithmName(): string
     {
         return self::ALGORITHM_NAME;
@@ -60,7 +58,7 @@ class ColorHistogramHashStrategy extends AbstractHashStrategy
         try {
             // Load image to check if it's grayscale
             $originalImage = VipsImage::newFromFile($filePath);
-            $this->isGrayscale = $originalImage->bands === 1 || $originalImage->interpretation === 'b-w';
+            $isGrayscale = $originalImage->bands === 1 || $originalImage->interpretation === 'b-w';
 
             // Now do the thumbnail
             $size = $this->getImageSizeForBits($bits);
@@ -72,7 +70,7 @@ class ColorHistogramHashStrategy extends AbstractHashStrategy
                 'export_profile' => 'srgb',
             ]);
 
-            return $this->hashFromVipsImage($image, $bits);
+            return $this->hashFromVipsImageWithGrayscale($image, $bits, $isGrayscale);
         } catch (\Exception $e) {
             throw new \Exception('Failed to generate hash: '.$e->getMessage());
         }
@@ -89,7 +87,7 @@ class ColorHistogramHashStrategy extends AbstractHashStrategy
         try {
             // Load image to check if it's grayscale
             $originalImage = VipsImage::newFromBuffer($imageData);
-            $this->isGrayscale = $originalImage->bands === 1 || $originalImage->interpretation === 'b-w';
+            $isGrayscale = $originalImage->bands === 1 || $originalImage->interpretation === 'b-w';
 
             // Now do the thumbnail
             $size = $this->getImageSizeForBits($bits);
@@ -101,7 +99,7 @@ class ColorHistogramHashStrategy extends AbstractHashStrategy
                 'export_profile' => 'srgb',
             ], $options));
 
-            return $this->hashFromVipsImage($image, $bits);
+            return $this->hashFromVipsImageWithGrayscale($image, $bits, $isGrayscale);
         } catch (\Exception $e) {
             throw new \Exception('Failed to generate hash from buffer: '.$e->getMessage());
         }
@@ -130,18 +128,25 @@ class ColorHistogramHashStrategy extends AbstractHashStrategy
 
     public function hashFromVipsImage(VipsImage $image, int $bits = 64): HashValue
     {
+        $isGrayscale = $image->bands === 1 || $image->interpretation === 'b-w';
+
+        return $this->hashFromVipsImageWithGrayscale($image, $bits, $isGrayscale);
+    }
+
+    private function hashFromVipsImageWithGrayscale(VipsImage $image, int $bits, bool $isGrayscale): HashValue
+    {
         if ($bits !== 64) {
             throw new \InvalidArgumentException('Color histogram hash only supports 64-bit hashes');
         }
 
         // Convert to HSV color space
-        $hsvImage = $this->convertToHSV($image);
+        $hsvImage = $this->convertToHSV($image, $isGrayscale);
 
         // Extract and quantize histogram
         $histogram = $this->computeQuantizedHistogram($hsvImage);
 
         // Generate hash from histogram
-        $hashValue = $this->generateHashFromHistogram($histogram);
+        $hashValue = $this->generateHashFromHistogram($histogram, $isGrayscale);
 
         return new HashValue($hashValue, $bits, $this->getAlgorithmName());
     }
@@ -149,14 +154,14 @@ class ColorHistogramHashStrategy extends AbstractHashStrategy
     /**
      * Convert image to HSV color space.
      */
-    private function convertToHSV(VipsImage $image): VipsImage
+    private function convertToHSV(VipsImage $image, bool $isGrayscale): VipsImage
     {
         // Flatten alpha channel if present
         if ($image->hasAlpha()) {
             $image = $image->flatten(['background' => [255, 255, 255]]);
         }
 
-        if ($this->isGrayscale) {
+        if ($isGrayscale) {
             // For grayscale images, convert to RGB first to enable HSV conversion
             $image = $image->colourspace('srgb');
         } else {
@@ -230,13 +235,13 @@ class ColorHistogramHashStrategy extends AbstractHashStrategy
     /**
      * Generate 64-bit hash from histogram using statistical encoding.
      */
-    private function generateHashFromHistogram(array $histogram): int
+    private function generateHashFromHistogram(array $histogram, bool $isGrayscale): int
     {
         $hash = 0;
         $totalBins = count($histogram);
 
         // For grayscale images, use a special encoding
-        if ($this->isGrayscale) {
+        if ($isGrayscale) {
             // Set bit 63 to indicate this is a grayscale image
             $hash |= (1 << 63);
 
