@@ -74,7 +74,7 @@ class ColorHistogramHashStrategy extends AbstractHashStrategy
 
             return $this->hashFromVipsImage($image, $bits);
         } catch (\Exception $e) {
-            throw new \Exception('Failed to generate hash: '.$e->getMessage());
+            throw new \RuntimeException('Failed to generate hash: '.$e->getMessage(), 0, $e);
         }
     }
 
@@ -103,7 +103,7 @@ class ColorHistogramHashStrategy extends AbstractHashStrategy
 
             return $this->hashFromVipsImage($image, $bits);
         } catch (\Exception $e) {
-            throw new \Exception('Failed to generate hash from buffer: '.$e->getMessage());
+            throw new \RuntimeException('Failed to generate hash from buffer: '.$e->getMessage(), 0, $e);
         }
     }
 
