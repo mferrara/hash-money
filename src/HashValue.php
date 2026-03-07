@@ -144,8 +144,9 @@ final class HashValue implements JsonSerializable
      */
     public static function fromHex(string $hex, int $bits, string $algorithm, array $metadata = []): self
     {
-        $hex = ltrim($hex, '0x');
-        $hex = ltrim($hex, '0X');
+        if (str_starts_with($hex, '0x') || str_starts_with($hex, '0X')) {
+            $hex = substr($hex, 2);
+        }
 
         if (! ctype_xdigit($hex)) {
             throw new InvalidArgumentException('Invalid hexadecimal string: must contain only hex digits');
@@ -165,10 +166,7 @@ final class HashValue implements JsonSerializable
             $low = hexdec(substr($hex, 8, 8));
             $value = ($high << 32) | $low;
 
-            // Handle negative values
-            if ($high >= 0x80000000) {
-                $value = $value - (1 << 64);
-            }
+            // Bitwise operations above already produce the correct signed 64-bit value
         } else {
             $value = (int) hexdec($hex);
         }
@@ -208,10 +206,7 @@ final class HashValue implements JsonSerializable
                 }
             }
 
-            // Handle sign bit for 64-bit values
-            if ($binary[0] === '1') {
-                $value = $value - (1 << 64);
-            }
+            // Bitwise operations above already produce the correct signed 64-bit value
         } else {
             $value = bindec($binary);
         }
@@ -252,7 +247,7 @@ final class HashValue implements JsonSerializable
 
         // Handle sign for 64-bit values
         if ($bits === 64 && ord($decoded[0]) >= 0x80) {
-            $value = $value - (1 << 64);
+            $value = (int) ($value - pow(2, 64));
         }
 
         return new self($value, $bits, $algorithm, $metadata);
@@ -267,11 +262,6 @@ final class HashValue implements JsonSerializable
     {
         $bytes = '';
         $value = $this->value;
-
-        // Handle negative 64-bit values
-        if ($this->bits === 64 && $value < 0) {
-            $value = $value + (1 << 64);
-        }
 
         // Convert to bytes
         for ($i = ($this->bits / 8) - 1; $i >= 0; $i--) {
@@ -320,11 +310,6 @@ final class HashValue implements JsonSerializable
         $count = 0;
         $value = $this->value;
 
-        // Handle negative values for 64-bit
-        if ($this->bits === 64 && $value < 0) {
-            $value = $value + (1 << 64);
-        }
-
         for ($i = 0; $i < $this->bits; $i++) {
             if (($value >> $i) & 1) {
                 $count++;
@@ -370,16 +355,16 @@ final class HashValue implements JsonSerializable
      */
     public function normalized(): float
     {
-        $value = $this->value;
+        if ($this->bits === 64) {
+            // Use float math to avoid 64-bit integer overflow
+            $unsigned = $this->value < 0 ? $this->value + pow(2, 64) : (float) $this->value;
 
-        // Handle negative 64-bit values
-        if ($this->bits === 64 && $value < 0) {
-            $value = $value + (1 << 64);
+            return $unsigned / (pow(2, 64) - 1);
         }
 
         $maxValue = (1 << $this->bits) - 1;
 
-        return $value / $maxValue;
+        return $this->value / $maxValue;
     }
 
     /**
