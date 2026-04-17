@@ -555,6 +555,10 @@ composer format
 - VIPS caching significantly improves performance for batch operations
 - The package automatically detects CPU cores for optimal concurrency
 
+## Rolling Out at Scale
+
+Before generating hashes for a large production dataset (~100K images or more), run the calibration and validation steps in [`PRE_BATCH_REVIEW.md`](PRE_BATCH_REVIEW.md) **inside your consumer project**. The guide covers version prerequisites, timing extrapolation, hash-distribution sanity checks, known-pair validation, failure-mode probes, database/query-plan review, and a go/no-go checklist. It's intended to be executable by either a human operator or an AI coding agent working in the consumer repo, and produces a single report that justifies the decision to run the full batch.
+
 ## Use Cases
 
 - **Duplicate Detection**: Find exact or near-duplicate images in large collections
