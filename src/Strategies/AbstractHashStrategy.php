@@ -12,39 +12,49 @@ use LegitPHP\HashMoney\HashValue;
 
 abstract class AbstractHashStrategy implements HashStrategy
 {
-    protected static bool $vipsInitialized = false;
+    private static array $configs = [];
 
-    protected static array $config = [
+    private static array $initialized = [];
+
+    private const DEFAULT_CONFIG = [
         'cores' => null,
-        'maxCacheSize' => 64,
-        'maxMemory' => 256,
+        'maxCacheSize' => 64,        // Max cached operations (libvips vips_cache_set_max)
+        'maxMemory' => 256,          // Max cache memory in MB (converted to bytes for libvips)
         'sequentialAccess' => true,
         'disableCache' => false,
     ];
 
     public function configure(array $config): void
     {
-        self::$config = array_merge(self::$config, $config);
+        $class = static::class;
+        self::$configs[$class] = array_merge(self::getConfig(), $config);
 
-        if (self::$vipsInitialized) {
-            self::$vipsInitialized = false;
+        if (self::$initialized[$class] ?? false) {
+            self::$initialized[$class] = false;
             $this->initVips();
         }
     }
 
+    protected static function getConfig(): array
+    {
+        return self::$configs[static::class] ?? self::DEFAULT_CONFIG;
+    }
+
     protected function initVips(): void
     {
-        if (! self::$vipsInitialized) {
-            $cores = self::$config['cores'] ?? min(8, max(2, $this->getNumCores()));
+        $class = static::class;
+        if (! (self::$initialized[$class] ?? false)) {
+            $config = self::getConfig();
+            $cores = $config['cores'] ?? min(8, max(2, $this->getNumCores()));
             Config::concurrencySet($cores);
-            Config::cacheSetMax(self::$config['maxCacheSize']);
-            Config::cacheSetMaxMem(self::$config['maxMemory']);
+            Config::cacheSetMax($config['maxCacheSize']);
+            Config::cacheSetMaxMem($config['maxMemory'] * 1024 * 1024);
 
-            if (self::$config['disableCache']) {
+            if ($config['disableCache']) {
                 Config::cacheSetMax(0);
             }
 
-            self::$vipsInitialized = true;
+            self::$initialized[$class] = true;
         }
     }
 

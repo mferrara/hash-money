@@ -195,13 +195,14 @@ if ($pHash->isCompatibleWith($fromHex)) {
 ```php
 // Configure VIPS settings for performance tuning
 PerceptualHash::configure([
-    'concurrency' => 4,
-    'cache_max' => 100 * 1024 * 1024, // 100MB
+    'cores' => 4,
+    'maxCacheSize' => 100,  // Max cached operations
+    'maxMemory' => 256,     // 256MB cache memory
 ]);
 
-// DHash uses the same configuration
+// Each strategy maintains its own configuration
 DHash::configure([
-    'concurrency' => 8,
+    'cores' => 8,
 ]);
 
 // Configure Color Histogram Hash quantization
@@ -209,7 +210,7 @@ ColorHistogramHash::configureQuantization(16, 8, 8); // 16 hue bins, 8 saturatio
 
 // MashedHash uses standard VIPS configuration
 MashedHash::configure([
-    'concurrency' => 4,
+    'cores' => 4,
 ]);
 ```
 
@@ -277,15 +278,15 @@ foreach ($hashes as $path1 => $hash1) {
 ```php
 // Configure for maximum performance
 PerceptualHash::configure([
-    'concurrency' => 8,              // Use 8 CPU cores
-    'cache_max' => 200 * 1024 * 1024, // 200MB cache
-    'disable_cache' => false,         // Enable caching
+    'cores' => 8,              // Use 8 CPU cores
+    'maxMemory' => 512,        // 512MB cache memory
+    'disableCache' => false,   // Enable caching
 ]);
 
-// Configure with different settings
+// Each strategy has independent configuration
 DHash::configure([
-    'concurrency' => 4,
-    'cache_max' => 100 * 1024 * 1024, // 100MB cache
+    'cores' => 4,
+    'maxMemory' => 256,        // 256MB cache memory
 ]);
 
 // Process from memory to avoid disk I/O
