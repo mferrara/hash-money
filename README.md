@@ -104,6 +104,17 @@ brew install vips
 pecl install vips
 ```
 
+### Versioning
+
+Hash Money follows [semantic versioning](https://semver.org/). Pin with
+`"legitphp/hash-money": "^1.1"` to take patch releases and additive
+minor releases automatically while opting in to majors deliberately.
+
+If you're rolling out at scale (~100K+ images), also read
+[`PRE_BATCH_REVIEW.md`](PRE_BATCH_REVIEW.md) before generating a
+production dataset — the guide covers version prerequisites, timing
+calibration, distribution/collision checks, and a go/no-go checklist.
+
 ## Usage
 
 ### Basic Usage
