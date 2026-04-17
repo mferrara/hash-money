@@ -2,8 +2,10 @@
 
 declare(strict_types=1);
 
+use Jcupitt\Vips\Image;
 use LegitPHP\HashMoney\ColorHistogramHash;
 use LegitPHP\HashMoney\HashValue;
+use LegitPHP\HashMoney\PerceptualHash;
 
 beforeEach(function () {
     ColorHistogramHash::configure(['cores' => 2]);
@@ -87,7 +89,7 @@ test('can configure HSV quantization levels', function () {
 
 test('handles images with alpha channel', function () {
     // Create a test image with alpha channel
-    $image = \Jcupitt\Vips\Image::black(100, 100, ['bands' => 4]);
+    $image = Image::black(100, 100, ['bands' => 4]);
     $image = $image->draw_rect([255, 0, 0, 128], 25, 25, 50, 50);
 
     $hash = ColorHistogramHash::hashFromVipsImage($image);
@@ -100,7 +102,7 @@ test('is robust to JPEG compression', function () {
     $originalHash = ColorHistogramHash::hashFromFile(__DIR__.'/../images/cat1.jpg');
 
     // Load and re-save with different quality
-    $image = \Jcupitt\Vips\Image::newFromFile(__DIR__.'/../images/cat1.jpg');
+    $image = Image::newFromFile(__DIR__.'/../images/cat1.jpg');
     $compressedData = $image->jpegsave_buffer(['Q' => 50]);
     $compressedHash = ColorHistogramHash::hashFromString($compressedData);
 
@@ -111,7 +113,7 @@ test('is robust to JPEG compression', function () {
 
 test('distance calculation throws exception for incompatible hashes', function () {
     $colorHash = ColorHistogramHash::hashFromFile(__DIR__.'/../images/cat1.jpg');
-    $perceptualHash = \LegitPHP\HashMoney\PerceptualHash::hashFromFile(__DIR__.'/../images/cat1.jpg');
+    $perceptualHash = PerceptualHash::hashFromFile(__DIR__.'/../images/cat1.jpg');
 
     ColorHistogramHash::distance($colorHash, $perceptualHash);
 })->throws(InvalidArgumentException::class, 'Cannot calculate Hamming distance: incompatible hashes');
