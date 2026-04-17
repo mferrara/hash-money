@@ -351,4 +351,57 @@ describe('HashValue Enhanced Features', function () {
             }
         });
     });
+
+    describe('fromHex leading zero preservation', function () {
+        test('fromHex preserves leading zeros without prefix', function () {
+            $hash = HashValue::fromHex('00ff', 16, 'test');
+            expect($hash->getValue())->toBe(0x00FF);
+            expect($hash->toHex())->toBe('00ff');
+        });
+
+        test('fromHex with lowercase hex prefix preserves leading zeros in value', function () {
+            $hash = HashValue::fromHex('0x00ff', 16, 'test');
+            expect($hash->getValue())->toBe(0x00FF);
+            expect($hash->toHex())->toBe('00ff');
+        });
+
+        test('fromHex with uppercase hex prefix preserves leading zeros in value', function () {
+            $hash = HashValue::fromHex('0X00ff', 16, 'test');
+            expect($hash->getValue())->toBe(0x00FF);
+            expect($hash->toHex())->toBe('00ff');
+        });
+
+        test('fromHex without prefix works for values starting with x-like chars', function () {
+            // Hex value that starts with a valid hex digit but would be corrupted by ltrim character set
+            $hash = HashValue::fromHex('0000000000000001', 64, 'test');
+            expect($hash->getValue())->toBe(1);
+        });
+    });
+
+    describe('normalized 64-bit correctness', function () {
+        test('normalized returns correct value for positive 64-bit', function () {
+            $hash = new HashValue(0, 64, 'test');
+            expect($hash->normalized())->toBe(0.0);
+        });
+
+        test('normalized returns 1.0 for max unsigned 64-bit', function () {
+            // -1 in signed = all bits set = max unsigned
+            $hash = new HashValue(-1, 64, 'test');
+            expect(abs($hash->normalized() - 1.0))->toBeLessThan(0.00001);
+        });
+
+        test('normalized returns approximately 0.5 for PHP_INT_MIN', function () {
+            // PHP_INT_MIN = 0x8000000000000000 = 2^63 unsigned
+            // normalized = 2^63 / (2^64 - 1) ≈ 0.5
+            $hash = new HashValue(PHP_INT_MIN, 64, 'test');
+            expect(abs($hash->normalized() - 0.5))->toBeLessThan(0.01);
+        });
+
+        test('normalized returns value in [0,1] range for arbitrary 64-bit', function () {
+            $hash = new HashValue(12345678, 64, 'test');
+            $normalized = $hash->normalized();
+            expect($normalized)->toBeGreaterThanOrEqual(0.0);
+            expect($normalized)->toBeLessThanOrEqual(1.0);
+        });
+    });
 });
