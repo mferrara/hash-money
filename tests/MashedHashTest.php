@@ -37,27 +37,18 @@ test('generates different hashes for different images', function () {
 });
 
 test('detects grayscale vs color images', function () {
-    $colorHash = MashedHash::hashFromFile(__DIR__.'/../images/cat1.jpg');
-    $bwHash = MashedHash::hashFromFile(__DIR__.'/../images/cat1-bw.jpg');
+    $color = MashedHash::decode(MashedHash::hashFromFile(__DIR__.'/../images/cat1.jpg'));
+    $bw = MashedHash::decode(MashedHash::hashFromFile(__DIR__.'/../images/cat1-bw.jpg'));
 
-    // Extract colorfulness bits (0-3)
-    $colorfulness1 = $colorHash->getValue() & 0xF;
-    $colorfulness2 = $bwHash->getValue() & 0xF;
-
-    expect($colorfulness1)->toBeGreaterThan(3); // Color image
-    expect($colorfulness2)->toBeLessThanOrEqual(3); // Grayscale
+    expect($color['colorfulness'])->toBeGreaterThan(3); // Color image
+    expect($bw['colorfulness'])->toBeLessThanOrEqual(3); // Grayscale
 });
 
 test('detects different aspect ratios', function () {
-    // We'll need to create test images with different aspect ratios
-    // For now, test that aspect ratio bits are set
-    $hash = MashedHash::hashFromFile(__DIR__.'/../images/cat1.jpg');
+    $decoded = MashedHash::decode(MashedHash::hashFromFile(__DIR__.'/../images/cat1.jpg'));
 
-    // Extract aspect ratio bits (12-14)
-    $aspectRatio = ($hash->getValue() >> 12) & 0x7;
-
-    expect($aspectRatio)->toBeGreaterThanOrEqual(0);
-    expect($aspectRatio)->toBeLessThanOrEqual(7);
+    expect($decoded['aspectRatio'])->toBeGreaterThanOrEqual(0);
+    expect($decoded['aspectRatio'])->toBeLessThanOrEqual(7);
 });
 
 test('can generate hash from image data in memory', function () {
@@ -137,18 +128,44 @@ test('handles images with alpha channel', function () {
     expect($hash->getAlgorithm())->toBe('mashed');
 });
 
-test('components are encoded in correct bit positions', function () {
-    $hash = MashedHash::hashFromFile(__DIR__.'/../images/cat1.jpg');
-    $value = $hash->getValue();
+test('components decode into expected ranges', function () {
+    $decoded = MashedHash::decode(MashedHash::hashFromFile(__DIR__.'/../images/cat1.jpg'));
 
-    // Check that various components are within expected ranges
-    $colorfulness = $value & 0xF;
-    $edgeDensity = ($value >> 4) & 0xF;
-    $entropy = ($value >> 8) & 0xF;
-    $aspectRatio = ($value >> 12) & 0x7;
+    expect($decoded['colorfulness'])->toBeGreaterThanOrEqual(0)->toBeLessThanOrEqual(15);
+    expect($decoded['edgeDensity'])->toBeGreaterThanOrEqual(0)->toBeLessThanOrEqual(15);
+    expect($decoded['entropy'])->toBeGreaterThanOrEqual(0)->toBeLessThanOrEqual(15);
+    expect($decoded['aspectRatio'])->toBeGreaterThanOrEqual(0)->toBeLessThanOrEqual(7);
+    expect($decoded['dominantColors'])->toBeGreaterThanOrEqual(0)->toBeLessThanOrEqual(15);
+    expect($decoded['brightness']['mean'])->toBeGreaterThanOrEqual(0)->toBeLessThanOrEqual(15);
+    expect($decoded['brightness']['range'])->toBeGreaterThanOrEqual(0)->toBeLessThanOrEqual(15);
+    expect($decoded['colorDistribution']['red'])->toBeGreaterThanOrEqual(0)->toBeLessThanOrEqual(31);
+});
 
-    expect($colorfulness)->toBeGreaterThanOrEqual(0)->toBeLessThanOrEqual(15);
-    expect($edgeDensity)->toBeGreaterThanOrEqual(0)->toBeLessThanOrEqual(15);
-    expect($entropy)->toBeGreaterThanOrEqual(0)->toBeLessThanOrEqual(15);
-    expect($aspectRatio)->toBeGreaterThanOrEqual(0)->toBeLessThanOrEqual(7);
+test('gray coding: adjacent quantization levels differ by one bit in the field', function () {
+    // Construct two component sets differing by exactly one ordinal level
+    // and verify the Hamming distance in that field is exactly 1 bit.
+    $strategy = new \LegitPHP\HashMoney\Strategies\MashedHashStrategy;
+    $reflection = new ReflectionMethod($strategy, 'packComponents');
+
+    $base = [
+        'colorfulness' => 7,
+        'edgeDensity' => 0,
+        'entropy' => 0,
+        'aspectRatio' => 0,
+        'hasBorder' => false,
+        'colorDistribution' => 0,
+        'spatialLayout' => 0,
+        'brightness' => 0,
+        'texture' => 0,
+        'dominantColors' => 0,
+        'special' => 0,
+    ];
+
+    $a = $reflection->invoke($strategy, $base);
+    $b = $reflection->invoke($strategy, array_merge($base, ['colorfulness' => 8]));
+
+    // Without Gray coding this would be 4 bits (binary 0111 vs 1000).
+    $xor = $a ^ $b;
+    $popcount = substr_count(decbin($xor < 0 ? $xor + PHP_INT_MAX + 1 + PHP_INT_MAX : $xor), '1');
+    expect($popcount)->toBe(1);
 });

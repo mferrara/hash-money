@@ -11,17 +11,26 @@ use LegitPHP\HashMoney\HashValue;
  * MashedHash Strategy - A comprehensive image fingerprint combining multiple characteristics.
  *
  * Bit allocation (64 bits total):
- * - Bits 0-3:    Colorfulness level (0-15)
- * - Bits 4-7:    Edge density (0-15)
- * - Bits 8-11:   Entropy/complexity (0-15)
- * - Bits 12-14:  Aspect ratio class (0-7)
+ * - Bits 0-3:    Colorfulness level (0-15)      [Gray-coded]
+ * - Bits 4-7:    Edge density (0-15)            [Gray-coded]
+ * - Bits 8-11:   Entropy/complexity (0-15)      [Gray-coded]
+ * - Bits 12-14:  Aspect ratio class (0-7)       [Gray-coded]
  * - Bit 15:      Border flag
- * - Bits 16-31:  Color distribution (16 bits)
- * - Bits 32-39:  Spatial color layout (8 bits)
- * - Bits 40-47:  Brightness pattern (8 bits)
- * - Bits 48-55:  Texture features (8 bits)
- * - Bits 56-59:  Dominant color count (0-15)
- * - Bits 60-63:  Special indicators (4 bits)
+ * - Bits 16-31:  Color distribution (16 bits)   [5+5+5 Gray-coded RGB, 1 dominance flag]
+ * - Bits 32-39:  Spatial color layout (8 bits)  [categorical, not Gray-coded]
+ * - Bits 40-47:  Brightness pattern (8 bits)    [4+4 Gray-coded mean/range]
+ * - Bits 48-55:  Texture features (8 bits)      [4+4 Gray-coded H/V]
+ * - Bits 56-59:  Dominant color count (0-15)    [Gray-coded]
+ * - Bits 60-63:  Special indicators (4 bits)    [bit-flags, not Gray-coded]
+ *
+ * Ordinal integer fields are stored in reflected-binary Gray code so that
+ * adjacent quantization levels differ by exactly one bit. Without Gray
+ * coding, a one-level quantization difference between two similar images
+ * (e.g. colorfulness 7 vs 8, binary 0111 vs 1000) would flip all four bits
+ * in that field, wrecking Hamming-distance-based similarity.
+ *
+ * Use {@see decode()} to read semantic field values; reading the raw bits
+ * directly will see the Gray-coded representation.
  */
 class MashedHashStrategy extends AbstractHashStrategy
 {
@@ -561,29 +570,134 @@ class MashedHashStrategy extends AbstractHashStrategy
     }
 
     /**
-     * Pack all components into a 64-bit hash.
+     * Pack all components into a 64-bit hash, applying Gray coding to
+     * ordinal fields.
      */
     private function packComponents(array $components): int
     {
         $hash = 0;
 
-        // Pack each component at its designated bit position
-        $hash |= ($components['colorfulness'] & self::COLORFULNESS_MASK) << self::COLORFULNESS_BITS;
-        $hash |= ($components['edgeDensity'] & self::EDGE_DENSITY_MASK) << self::EDGE_DENSITY_BITS;
-        $hash |= ($components['entropy'] & self::ENTROPY_MASK) << self::ENTROPY_BITS;
-        $hash |= ($components['aspectRatio'] & self::ASPECT_RATIO_MASK) << self::ASPECT_RATIO_BITS;
+        $hash |= (self::grayEncode($components['colorfulness']) & self::COLORFULNESS_MASK) << self::COLORFULNESS_BITS;
+        $hash |= (self::grayEncode($components['edgeDensity']) & self::EDGE_DENSITY_MASK) << self::EDGE_DENSITY_BITS;
+        $hash |= (self::grayEncode($components['entropy']) & self::ENTROPY_MASK) << self::ENTROPY_BITS;
+        $hash |= (self::grayEncode($components['aspectRatio']) & self::ASPECT_RATIO_MASK) << self::ASPECT_RATIO_BITS;
 
         if ($components['hasBorder']) {
             $hash |= 1 << self::BORDER_FLAG_BIT;
         }
 
-        $hash |= ($components['colorDistribution'] & self::COLOR_DIST_MASK) << self::COLOR_DIST_BITS;
+        $hash |= (self::grayEncodeColorDistribution($components['colorDistribution']) & self::COLOR_DIST_MASK) << self::COLOR_DIST_BITS;
         $hash |= ($components['spatialLayout'] & self::SPATIAL_LAYOUT_MASK) << self::SPATIAL_LAYOUT_BITS;
-        $hash |= ($components['brightness'] & self::BRIGHTNESS_MASK) << self::BRIGHTNESS_BITS;
-        $hash |= ($components['texture'] & self::TEXTURE_MASK) << self::TEXTURE_BITS;
-        $hash |= ($components['dominantColors'] & self::DOMINANT_COLOR_MASK) << self::DOMINANT_COLOR_BITS;
+        $hash |= (self::grayEncodePaired4($components['brightness']) & self::BRIGHTNESS_MASK) << self::BRIGHTNESS_BITS;
+        $hash |= (self::grayEncodePaired4($components['texture']) & self::TEXTURE_MASK) << self::TEXTURE_BITS;
+        $hash |= (self::grayEncode($components['dominantColors']) & self::DOMINANT_COLOR_MASK) << self::DOMINANT_COLOR_BITS;
         $hash |= ($components['special'] & self::SPECIAL_MASK) << self::SPECIAL_BITS;
 
         return $hash;
+    }
+
+    /**
+     * Decode a 64-bit MashedHash value into its semantic components.
+     *
+     * @return array{
+     *     colorfulness: int,
+     *     edgeDensity: int,
+     *     entropy: int,
+     *     aspectRatio: int,
+     *     hasBorder: bool,
+     *     colorDistribution: array{red: int, green: int, blue: int, hasDominantChannel: bool},
+     *     spatialLayout: int,
+     *     brightness: array{mean: int, range: int},
+     *     texture: array{horizontal: int, vertical: int},
+     *     dominantColors: int,
+     *     special: int,
+     * }
+     */
+    public function decode(HashValue $hash): array
+    {
+        if ($hash->getAlgorithm() !== self::ALGORITHM_NAME || $hash->getBits() !== 64) {
+            throw new \InvalidArgumentException(
+                sprintf('Expected a 64-bit %s hash', self::ALGORITHM_NAME)
+            );
+        }
+
+        $value = $hash->getValue();
+
+        $colorDist = ($value >> self::COLOR_DIST_BITS) & self::COLOR_DIST_MASK;
+        $brightness = ($value >> self::BRIGHTNESS_BITS) & self::BRIGHTNESS_MASK;
+        $texture = ($value >> self::TEXTURE_BITS) & self::TEXTURE_MASK;
+
+        return [
+            'colorfulness' => self::grayDecode(($value >> self::COLORFULNESS_BITS) & self::COLORFULNESS_MASK),
+            'edgeDensity' => self::grayDecode(($value >> self::EDGE_DENSITY_BITS) & self::EDGE_DENSITY_MASK),
+            'entropy' => self::grayDecode(($value >> self::ENTROPY_BITS) & self::ENTROPY_MASK),
+            'aspectRatio' => self::grayDecode(($value >> self::ASPECT_RATIO_BITS) & self::ASPECT_RATIO_MASK),
+            'hasBorder' => (bool) (($value >> self::BORDER_FLAG_BIT) & 1),
+            'colorDistribution' => [
+                'red' => self::grayDecode($colorDist & 0x1F),
+                'green' => self::grayDecode(($colorDist >> 5) & 0x1F),
+                'blue' => self::grayDecode(($colorDist >> 10) & 0x1F),
+                'hasDominantChannel' => (bool) (($colorDist >> 15) & 1),
+            ],
+            'spatialLayout' => ($value >> self::SPATIAL_LAYOUT_BITS) & self::SPATIAL_LAYOUT_MASK,
+            'brightness' => [
+                'mean' => self::grayDecode(($brightness >> 4) & 0xF),
+                'range' => self::grayDecode($brightness & 0xF),
+            ],
+            'texture' => [
+                'horizontal' => self::grayDecode(($texture >> 4) & 0xF),
+                'vertical' => self::grayDecode($texture & 0xF),
+            ],
+            'dominantColors' => self::grayDecode(($value >> self::DOMINANT_COLOR_BITS) & self::DOMINANT_COLOR_MASK),
+            'special' => ($value >> self::SPECIAL_BITS) & self::SPECIAL_MASK,
+        ];
+    }
+
+    /**
+     * Reflected binary Gray code: binary → gray.
+     * Adjacent binary levels (N, N+1) produce Gray codes that differ by exactly one bit.
+     */
+    private static function grayEncode(int $binary): int
+    {
+        return $binary ^ ($binary >> 1);
+    }
+
+    private static function grayDecode(int $gray): int
+    {
+        $binary = $gray;
+        while ($gray >>= 1) {
+            $binary ^= $gray;
+        }
+
+        return $binary;
+    }
+
+    /**
+     * Re-encode the packed 16-bit colorDistribution value: the three 5-bit
+     * RGB channels are ordinal (Gray-coded); the top dominance flag is not.
+     */
+    private static function grayEncodeColorDistribution(int $cd): int
+    {
+        $r = $cd & 0x1F;
+        $g = ($cd >> 5) & 0x1F;
+        $b = ($cd >> 10) & 0x1F;
+        $dominance = ($cd >> 15) & 1;
+
+        return self::grayEncode($r)
+            | (self::grayEncode($g) << 5)
+            | (self::grayEncode($b) << 10)
+            | ($dominance << 15);
+    }
+
+    /**
+     * Re-encode an 8-bit packed value that holds two 4-bit ordinal fields
+     * (high nibble + low nibble), Gray-coding each nibble independently.
+     */
+    private static function grayEncodePaired4(int $packed): int
+    {
+        $high = ($packed >> 4) & 0xF;
+        $low = $packed & 0xF;
+
+        return (self::grayEncode($high) << 4) | self::grayEncode($low);
     }
 }

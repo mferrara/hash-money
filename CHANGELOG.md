@@ -5,6 +5,61 @@ All notable changes to `hash-money` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.2.0] - 2026-04-20
+
+### Added
+
+- **BlockMeanHash** — classic block-mean hash (resize to √bits × √bits
+  grayscale → threshold each cell against the overall mean). Supports
+  8/16/32/64/128/256-bit output. Spatial-domain fingerprint that
+  complements pHash (frequency-domain) and dHash (gradient-domain); ideal
+  as a 4th chunk in a composite hash.
+- **CompositeHashStrategy + CompositeHash facade** — concatenates the
+  byte output of several sub-strategies into one wider `HashValue`. The
+  default `CompositeHash::default()` is the 256-bit quartet
+  `pHash64 + dHash64 + ColorHistogram64 + BlockMean64`, a multi-view
+  fingerprint whose chunks are statistically independent (which is what
+  LSH banding needs to avoid hot buckets). Chunk layout is preserved in
+  the `HashValue`'s `chunks` metadata.
+- **`Lsh` banding helpers** — `Lsh::bands($hash, $count)` splits a hash
+  into N equal bands and returns 64-bit bucket keys for building a
+  banded LSH index. `Lsh::bandsByChunk($hash, $bandsPerChunk)` does
+  per-chunk sub-banding for composite hashes, preserving the semantic
+  identity of each chunk (pHash band 2, color band 1, etc.) for more
+  meaningful candidate filtering.
+- **`MultiIndexHash::chunks($hash, $count)`** — splits a 64-bit hash into
+  equal chunks for Multi-Index Hashing. For Hamming threshold k ≤ chunks-1
+  on a 64-bit hash, pigeonhole guarantees at least one chunk matches
+  exactly between any two hashes within k bits. Massively faster than
+  naïve `BIT_COUNT` scans at small k on large tables.
+- **`HashValue` byte-backed internal representation** — `HashValue` now
+  stores the hash as a big-endian byte string internally, supporting any
+  multiple-of-8 bit size from 8 up to 4096 bits. The integer constructor
+  (`new HashValue(int, int, string)`) continues to work for the standard
+  {8, 16, 32, 64} sizes, so existing callers are unaffected. Wider hashes
+  use `HashValue::fromBytes()`, `fromHex()`, `fromBase64()`, etc. The new
+  `getBytes()` accessor returns the raw big-endian bytes; `getValue()`
+  throws `LogicException` for hashes wider than 64 bits.
+- **`MashedHash::decode($hash)`** — decoder that returns a structured
+  array of the hash's semantic fields (colorfulness, edgeDensity, …).
+- **`docs/LARAVEL_BRIDGE.md`** — proposed design for the future
+  `legitphp/hash-money-laravel` package (Eloquent cast, migration
+  helpers, query scopes, pluggable index drivers, jobs, config).
+
+### Changed
+
+- **MashedHash ordinal fields are now Gray-coded.** Adjacent quantization
+  levels (e.g. colorfulness 7 ↔ 8) previously caused Hamming-distance
+  spikes because their binary encodings flipped up to 4 bits; now they
+  differ by exactly one bit, which makes Hamming distance a meaningful
+  similarity measure for MashedHash instead of a fingerprint-category
+  signal. Only ordinal fields are coded — flag bits (border flag,
+  colorDistribution dominance, special indicators) and categorical
+  fields (spatialLayout) are left alone. **Reading raw bit fields of
+  a MashedHash now sees the Gray-coded value; use `MashedHash::decode()`
+  to read semantic levels.** Hash values differ from previous versions;
+  rehash existing MashedHash data to use the new encoding.
+
 ## [1.1.0] - 2026-04-17
 
 First tagged release since `v1.0.0` (2025-06-15). A substantial amount of

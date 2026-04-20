@@ -103,4 +103,16 @@ class MashedHash
     {
         return self::getStrategy()->distance($hash1, $hash2);
     }
+
+    /**
+     * Decode a MashedHash value into its semantic components.
+     *
+     * Because ordinal fields are Gray-coded, reading the raw bits of a
+     * MashedHash gives the encoded representation, not the semantic level.
+     * Use this method to read meaningful field values.
+     */
+    public static function decode(HashValue $hash): array
+    {
+        return self::getStrategy()->decode($hash);
+    }
 }

@@ -6,76 +6,224 @@ namespace LegitPHP\HashMoney;
 
 use InvalidArgumentException;
 use JsonSerializable;
+use LogicException;
 
 /**
- * HashValue - An immutable value object representing a hash.
+ * HashValue - An immutable value object representing a hash of arbitrary bit-size.
  *
- * This class provides a comprehensive API for working with hash values,
- * supporting multiple bit sizes and offering various utility methods
- * for comparison, transformation, and serialization.
+ * Internally the hash is stored as a big-endian byte string. For bit sizes of
+ * 8, 16, 32 or 64 the class exposes an integer-based API (getValue(), the int
+ * constructor) that matches the previous public surface. For larger hashes
+ * (128+ bit composite/wide hashes used for LSH) use the byte-oriented
+ * accessors (toHex(), toBase64(), getBytes()) and the fromBytes()/fromHex()
+ * named constructors.
  *
  * @example
  * ```php
+ * // 64-bit int style (unchanged)
  * $hash = new HashValue(0x1234567890ABCDEF, 64, 'perceptual');
  * echo $hash->toHex(); // "1234567890abcdef"
- * echo $hash->toBase64(); // "EjRWeJCr3v8="
  *
- * // Factory methods
- * $fromHex = HashValue::fromHex('1234567890abcdef', 64, 'perceptual');
- * $fromBinary = HashValue::fromBinary('1010101010101010', 'dhash');
+ * // Wide hash from bytes
+ * $wide = HashValue::fromBytes(random_bytes(32), 'composite:perceptual+dhash');
+ * echo $wide->getBits(); // 256
  * ```
  */
 final class HashValue implements JsonSerializable
 {
-    private const SUPPORTED_BITS = [8, 16, 32, 64];
+    /** Bit sizes that accept the integer form of the public constructor. */
+    private const INT_CONSTRUCTOR_SIZES = [8, 16, 32, 64];
 
-    /** @var string|null Cached hex representation */
+    /** Upper sanity bound on hash size. */
+    private const MAX_BITS = 4096;
+
+    /** Big-endian raw bytes. Always length = bits/8. */
+    private readonly string $bytes;
+
+    private readonly int $bits;
+
+    private readonly string $algorithm;
+
+    private readonly array $metadata;
+
     private ?string $hexCache = null;
 
-    /** @var string|null Cached binary representation */
     private ?string $binaryCache = null;
 
-    /** @var array Optional metadata for storing additional information */
-    private array $metadata;
+    /** @var array<int,int>|null Lazy popcount lookup table. */
+    private static ?array $popcountTable = null;
 
+    /**
+     * Construct a HashValue.
+     *
+     * Two input modes:
+     *  - int value + bits in {8, 16, 32, 64}: legacy int form.
+     *  - raw big-endian byte string + bits matching strlen($value)*8: wide form.
+     *
+     * @param  int|string  $value  Integer value (≤64-bit) or raw byte string (any multiple-of-8 bit size)
+     */
     public function __construct(
-        private readonly int $value,
-        private readonly int $bits,
-        private readonly string $algorithm,
+        int|string $value,
+        int $bits,
+        string $algorithm,
         array $metadata = []
     ) {
-        $this->metadata = $metadata;
-        if (! in_array($bits, self::SUPPORTED_BITS, true)) {
-            throw new InvalidArgumentException(
-                sprintf('Unsupported bit size: %d. Supported sizes are: %s', $bits, implode(', ', self::SUPPORTED_BITS))
-            );
-        }
-
-        $maxValue = (1 << $bits) - 1;
-        if ($bits === 64) {
-            // For 64-bit, we need to handle signed integers
-            $maxPositive = PHP_INT_MAX;
-            $minNegative = PHP_INT_MIN;
-            if ($value > $maxPositive || $value < $minNegative) {
-                throw new InvalidArgumentException('Hash value exceeds 64-bit integer range');
-            }
-        } else {
-            // For smaller bit sizes, ensure value fits
-            if ($value < 0 || $value > $maxValue) {
-                throw new InvalidArgumentException(
-                    sprintf('Hash value %d exceeds %d-bit range (0-%d)', $value, $bits, $maxValue)
-                );
-            }
-        }
-
         if (empty($algorithm)) {
             throw new InvalidArgumentException('Algorithm name cannot be empty');
         }
+
+        if (is_int($value)) {
+            if (! in_array($bits, self::INT_CONSTRUCTOR_SIZES, true)) {
+                throw new InvalidArgumentException(
+                    sprintf(
+                        'Unsupported bit size: %d. The integer constructor supports: %s. '.
+                        'For larger hashes, use HashValue::fromBytes() or HashValue::fromHex().',
+                        $bits,
+                        implode(', ', self::INT_CONSTRUCTOR_SIZES)
+                    )
+                );
+            }
+
+            if ($bits < 64) {
+                $maxValue = (1 << $bits) - 1;
+                if ($value < 0 || $value > $maxValue) {
+                    throw new InvalidArgumentException(
+                        sprintf('Hash value %d exceeds %d-bit range (0-%d)', $value, $bits, $maxValue)
+                    );
+                }
+            } elseif ($value > PHP_INT_MAX || $value < PHP_INT_MIN) {
+                // Unreachable in practice on 64-bit PHP but mirrors prior API.
+                throw new InvalidArgumentException('Hash value exceeds 64-bit integer range');
+            }
+
+            $this->bytes = self::intToBytes($value, $bits);
+        } else {
+            if ($bits <= 0 || $bits % 8 !== 0 || $bits > self::MAX_BITS) {
+                throw new InvalidArgumentException(
+                    sprintf('Invalid bit size %d (must be a positive multiple of 8 up to %d)', $bits, self::MAX_BITS)
+                );
+            }
+
+            if (strlen($value) * 8 !== $bits) {
+                throw new InvalidArgumentException(
+                    sprintf('Byte string length %d does not match %d bits', strlen($value), $bits)
+                );
+            }
+
+            $this->bytes = $value;
+        }
+
+        $this->bits = $bits;
+        $this->algorithm = $algorithm;
+        $this->metadata = $metadata;
     }
 
+    /**
+     * Create a HashValue directly from raw bytes. Bit size is derived from length.
+     */
+    public static function fromBytes(string $bytes, string $algorithm, array $metadata = []): self
+    {
+        return new self($bytes, strlen($bytes) * 8, $algorithm, $metadata);
+    }
+
+    /**
+     * Create a HashValue from a hexadecimal string. Prefix "0x"/"0X" is accepted.
+     */
+    public static function fromHex(string $hex, int $bits, string $algorithm, array $metadata = []): self
+    {
+        if (str_starts_with($hex, '0x') || str_starts_with($hex, '0X')) {
+            $hex = substr($hex, 2);
+        }
+
+        if (! ctype_xdigit($hex)) {
+            throw new InvalidArgumentException('Invalid hexadecimal string: must contain only hex digits');
+        }
+
+        $expectedLength = intdiv($bits, 4);
+        if ($bits % 4 !== 0 || strlen($hex) !== $expectedLength) {
+            throw new InvalidArgumentException(
+                sprintf('Hex string length mismatch: expected %d characters for %d-bit hash, got %d',
+                    $expectedLength, $bits, strlen($hex))
+            );
+        }
+
+        $bytes = hex2bin($hex);
+
+        return new self($bytes, $bits, $algorithm, $metadata);
+    }
+
+    /**
+     * Create a HashValue from a binary (0/1) string. Length must be a multiple of 8.
+     */
+    public static function fromBinary(string $binary, string $algorithm, array $metadata = []): self
+    {
+        if (! preg_match('/^[01]+$/', $binary)) {
+            throw new InvalidArgumentException('Invalid binary string: must contain only 0 and 1');
+        }
+
+        $bits = strlen($binary);
+        if ($bits <= 0 || $bits % 8 !== 0 || $bits > self::MAX_BITS) {
+            throw new InvalidArgumentException(
+                sprintf('Binary string length %d does not match a supported bit size (must be a positive multiple of 8)', $bits)
+            );
+        }
+
+        $bytes = '';
+        for ($i = 0; $i < $bits; $i += 8) {
+            $bytes .= chr((int) bindec(substr($binary, $i, 8)));
+        }
+
+        return new self($bytes, $bits, $algorithm, $metadata);
+    }
+
+    /**
+     * Create a HashValue from a base64 (standard or url-safe) encoded byte string.
+     */
+    public static function fromBase64(string $base64, int $bits, string $algorithm, array $metadata = []): self
+    {
+        $normalized = strtr($base64, '-_', '+/');
+        $decoded = base64_decode($normalized, true);
+        if ($decoded === false) {
+            throw new InvalidArgumentException('Invalid base64 string');
+        }
+
+        $expectedBytes = intdiv($bits, 8);
+        if ($bits % 8 !== 0 || strlen($decoded) !== $expectedBytes) {
+            throw new InvalidArgumentException(
+                sprintf('Base64 decoded length mismatch: expected %d bytes for %d-bit hash, got %d',
+                    $expectedBytes, $bits, strlen($decoded))
+            );
+        }
+
+        return new self($decoded, $bits, $algorithm, $metadata);
+    }
+
+    /**
+     * Returns the integer representation of the hash for bit sizes ≤64.
+     *
+     * @throws LogicException for hashes wider than 64 bits
+     */
     public function getValue(): int
     {
-        return $this->value;
+        if (! in_array($this->bits, self::INT_CONSTRUCTOR_SIZES, true)) {
+            throw new LogicException(
+                sprintf(
+                    'getValue() only supports bit sizes [%s]; got %d-bit. Use getBytes() or toHex().',
+                    implode(', ', self::INT_CONSTRUCTOR_SIZES),
+                    $this->bits
+                )
+            );
+        }
+
+        return self::bytesToInt($this->bytes, $this->bits);
+    }
+
+    /**
+     * Raw big-endian bytes. Length is always bits/8.
+     */
+    public function getBytes(): string
+    {
+        return $this->bytes;
     }
 
     public function getBits(): int
@@ -90,38 +238,36 @@ final class HashValue implements JsonSerializable
 
     public function toHex(): string
     {
-        if ($this->hexCache === null) {
-            if ($this->bits === 64) {
-                // Handle 64-bit values (including negative)
-                $this->hexCache = sprintf('%016x', $this->value);
-            } else {
-                $hexDigits = $this->bits / 4;
-                $this->hexCache = sprintf('%0'.$hexDigits.'x', $this->value);
-            }
-        }
-
-        return $this->hexCache;
+        return $this->hexCache ??= bin2hex($this->bytes);
     }
 
     public function toBinary(): string
     {
-        if ($this->binaryCache === null) {
-            if ($this->bits === 64 && $this->value < 0) {
-                // For negative 64-bit values, we need special handling
-                $binary = decbin($this->value);
-                // PHP's decbin returns full binary for negative numbers, we want just 64 bits
-                $this->binaryCache = substr($binary, -64);
-            } else {
-                $this->binaryCache = sprintf('%0'.$this->bits.'b', $this->value);
-            }
+        if ($this->binaryCache !== null) {
+            return $this->binaryCache;
         }
 
-        return $this->binaryCache;
+        $binary = '';
+        for ($i = 0, $len = strlen($this->bytes); $i < $len; $i++) {
+            $binary .= sprintf('%08b', ord($this->bytes[$i]));
+        }
+
+        return $this->binaryCache = $binary;
+    }
+
+    public function toBase64(): string
+    {
+        return base64_encode($this->bytes);
+    }
+
+    public function toUrlSafeBase64(): string
+    {
+        return strtr($this->toBase64(), '+/', '-_');
     }
 
     public function equals(HashValue $other): bool
     {
-        return $this->value === $other->value
+        return $this->bytes === $other->bytes
             && $this->bits === $other->bits
             && $this->algorithm === $other->algorithm;
     }
@@ -133,161 +279,7 @@ final class HashValue implements JsonSerializable
     }
 
     /**
-     * Create a HashValue from a hexadecimal string.
-     *
-     * @param  string  $hex  The hexadecimal string (with or without 0x prefix)
-     * @param  int  $bits  The bit size of the hash
-     * @param  string  $algorithm  The algorithm name
-     * @param  array  $metadata  Optional metadata
-     *
-     * @throws InvalidArgumentException If the hex string is invalid
-     */
-    public static function fromHex(string $hex, int $bits, string $algorithm, array $metadata = []): self
-    {
-        if (str_starts_with($hex, '0x') || str_starts_with($hex, '0X')) {
-            $hex = substr($hex, 2);
-        }
-
-        if (! ctype_xdigit($hex)) {
-            throw new InvalidArgumentException('Invalid hexadecimal string: must contain only hex digits');
-        }
-
-        $expectedLength = $bits / 4;
-        if (strlen($hex) !== $expectedLength) {
-            throw new InvalidArgumentException(
-                sprintf('Hex string length mismatch: expected %d characters for %d-bit hash, got %d',
-                    $expectedLength, $bits, strlen($hex))
-            );
-        }
-
-        // Handle 64-bit values specially due to PHP's signed integers
-        if ($bits === 64) {
-            $high = hexdec(substr($hex, 0, 8));
-            $low = hexdec(substr($hex, 8, 8));
-            $value = ($high << 32) | $low;
-
-            // Bitwise operations above already produce the correct signed 64-bit value
-        } else {
-            $value = (int) hexdec($hex);
-        }
-
-        return new self($value, $bits, $algorithm, $metadata);
-    }
-
-    /**
-     * Create a HashValue from a binary string.
-     *
-     * @param  string  $binary  The binary string (only 0 and 1 characters)
-     * @param  string  $algorithm  The algorithm name
-     * @param  array  $metadata  Optional metadata
-     *
-     * @throws InvalidArgumentException If the binary string is invalid
-     */
-    public static function fromBinary(string $binary, string $algorithm, array $metadata = []): self
-    {
-        if (! preg_match('/^[01]+$/', $binary)) {
-            throw new InvalidArgumentException('Invalid binary string: must contain only 0 and 1');
-        }
-
-        $bits = strlen($binary);
-        if (! in_array($bits, self::SUPPORTED_BITS, true)) {
-            throw new InvalidArgumentException(
-                sprintf('Binary string length %d does not match a supported bit size: %s',
-                    $bits, implode(', ', self::SUPPORTED_BITS))
-            );
-        }
-
-        // Handle 64-bit values specially
-        if ($bits === 64) {
-            $value = 0;
-            for ($i = 0; $i < 64; $i++) {
-                if ($binary[$i] === '1') {
-                    $value |= (1 << (63 - $i));
-                }
-            }
-
-            // Bitwise operations above already produce the correct signed 64-bit value
-        } else {
-            $value = bindec($binary);
-        }
-
-        return new self($value, $bits, $algorithm, $metadata);
-    }
-
-    /**
-     * Create a HashValue from a base64 string.
-     *
-     * @param  string  $base64  The base64 encoded string
-     * @param  int  $bits  The bit size of the hash
-     * @param  string  $algorithm  The algorithm name
-     * @param  array  $metadata  Optional metadata
-     *
-     * @throws InvalidArgumentException If the base64 string is invalid
-     */
-    public static function fromBase64(string $base64, int $bits, string $algorithm, array $metadata = []): self
-    {
-        $decoded = base64_decode($base64, true);
-        if ($decoded === false) {
-            throw new InvalidArgumentException('Invalid base64 string');
-        }
-
-        $expectedBytes = $bits / 8;
-        if (strlen($decoded) !== $expectedBytes) {
-            throw new InvalidArgumentException(
-                sprintf('Base64 decoded length mismatch: expected %d bytes for %d-bit hash, got %d',
-                    $expectedBytes, $bits, strlen($decoded))
-            );
-        }
-
-        // Convert bytes to integer
-        $value = 0;
-        for ($i = 0; $i < strlen($decoded); $i++) {
-            $value = ($value << 8) | ord($decoded[$i]);
-        }
-
-        // Handle sign for 64-bit values
-        if ($bits === 64 && ord($decoded[0]) >= 0x80) {
-            $value = (int) ($value - pow(2, 64));
-        }
-
-        return new self($value, $bits, $algorithm, $metadata);
-    }
-
-    /**
-     * Convert hash to base64 encoding.
-     *
-     * @return string Base64 encoded hash
-     */
-    public function toBase64(): string
-    {
-        $bytes = '';
-        $value = $this->value;
-
-        // Convert to bytes
-        for ($i = ($this->bits / 8) - 1; $i >= 0; $i--) {
-            $bytes .= chr(($value >> ($i * 8)) & 0xFF);
-        }
-
-        return base64_encode($bytes);
-    }
-
-    /**
-     * Convert hash to URL-safe base64 encoding.
-     *
-     * @return string URL-safe base64 encoded hash
-     */
-    public function toUrlSafeBase64(): string
-    {
-        return strtr($this->toBase64(), '+/', '-_');
-    }
-
-    /**
-     * Get the value of a specific bit.
-     *
-     * @param  int  $position  The bit position (0-based, from right)
-     * @return bool True if bit is set, false otherwise
-     *
-     * @throws InvalidArgumentException If position is out of range
+     * Read a single bit. Position 0 is the least-significant bit (last byte, LSB).
      */
     public function getBit(int $position): bool
     {
@@ -297,35 +289,21 @@ final class HashValue implements JsonSerializable
             );
         }
 
-        return (bool) (($this->value >> $position) & 1);
+        $byteIndex = strlen($this->bytes) - 1 - intdiv($position, 8);
+        $bitIndex = $position % 8;
+
+        return (bool) ((ord($this->bytes[$byteIndex]) >> $bitIndex) & 1);
     }
 
-    /**
-     * Count the number of set bits (1s) in the hash.
-     *
-     * @return int Number of set bits
-     */
     public function countSetBits(): int
     {
-        $count = 0;
-        $value = $this->value;
-
-        for ($i = 0; $i < $this->bits; $i++) {
-            if (($value >> $i) & 1) {
-                $count++;
-            }
-        }
-
-        return $count;
+        return self::popcountBytes($this->bytes);
     }
 
     /**
-     * Calculate Hamming distance to another hash.
+     * Hamming distance to another compatible hash (same algorithm + bits).
      *
-     * @param  HashValue  $other  The other hash to compare with
-     * @return int The Hamming distance (number of differing bits)
-     *
-     * @throws InvalidArgumentException If hashes are incompatible
+     * @throws InvalidArgumentException when hashes are incompatible
      */
     public function hammingDistance(HashValue $other): int
     {
@@ -336,42 +314,36 @@ final class HashValue implements JsonSerializable
             );
         }
 
-        $diff = $this->value ^ $other->value;
-        $distance = 0;
-
-        for ($i = 0; $i < $this->bits; $i++) {
-            if (($diff >> $i) & 1) {
-                $distance++;
-            }
-        }
-
-        return $distance;
+        return self::popcountBytes($this->bytes ^ $other->bytes);
     }
 
     /**
-     * Return a normalized value between 0 and 1.
-     *
-     * @return float Normalized value
+     * Normalized 0..1 value. Exact for ≤64-bit hashes; approximates via top 8 bytes for wider hashes.
      */
     public function normalized(): float
     {
-        if ($this->bits === 64) {
-            // Use float math to avoid 64-bit integer overflow
-            $unsigned = $this->value < 0 ? $this->value + pow(2, 64) : (float) $this->value;
+        if (in_array($this->bits, self::INT_CONSTRUCTOR_SIZES, true)) {
+            if ($this->bits === 64) {
+                $value = $this->getValue();
+                $unsigned = $value < 0 ? $value + pow(2, 64) : (float) $value;
 
-            return $unsigned / (pow(2, 64) - 1);
+                return $unsigned / (pow(2, 64) - 1);
+            }
+
+            $maxValue = (1 << $this->bits) - 1;
+
+            return $this->getValue() / $maxValue;
         }
 
-        $maxValue = (1 << $this->bits) - 1;
+        $topBytes = str_pad(substr($this->bytes, 0, 8), 8, "\x00");
+        $unpacked = unpack('J', $topBytes)[1];
+        $unsigned = $unpacked < 0 ? $unpacked + pow(2, 64) : (float) $unpacked;
 
-        return $this->value / $maxValue;
+        return $unsigned / (pow(2, 64) - 1);
     }
 
     /**
-     * Get metadata associated with this hash.
-     *
-     * @param  string|null  $key  Optional key to get specific metadata
-     * @return mixed The metadata array or specific value if key provided
+     * @return mixed The metadata array or a specific value if a key is given
      */
     public function getMetadata(?string $key = null): mixed
     {
@@ -382,26 +354,18 @@ final class HashValue implements JsonSerializable
         return $this->metadata[$key] ?? null;
     }
 
-    /**
-     * Create a new HashValue with updated metadata.
-     *
-     * @param  array  $metadata  The new metadata
-     * @return self New HashValue instance with updated metadata
-     */
     public function withMetadata(array $metadata): self
     {
-        return new self($this->value, $this->bits, $this->algorithm, $metadata);
+        return new self($this->bytes, $this->bits, $this->algorithm, $metadata);
     }
 
     /**
-     * Convert hash to array representation.
-     *
-     * @return array{value: int, bits: int, algorithm: string, hex: string, metadata: array}
+     * @return array{value: ?int, bits: int, algorithm: string, hex: string, metadata: array}
      */
     public function toArray(): array
     {
         return [
-            'value' => $this->value,
+            'value' => in_array($this->bits, self::INT_CONSTRUCTOR_SIZES, true) ? $this->getValue() : null,
             'bits' => $this->bits,
             'algorithm' => $this->algorithm,
             'hex' => $this->toHex(),
@@ -410,11 +374,7 @@ final class HashValue implements JsonSerializable
     }
 
     /**
-     * Create HashValue from array representation.
-     *
-     * @param  array{value?: int, bits?: int, algorithm?: string, hex?: string, metadata?: array}  $data
-     *
-     * @throws InvalidArgumentException If required data is missing
+     * @param  array{value?: ?int, bits?: int, algorithm?: string, hex?: string, metadata?: array}  $data
      */
     public static function fromArray(array $data): self
     {
@@ -442,27 +402,22 @@ final class HashValue implements JsonSerializable
     }
 
     /**
-     * JsonSerializable implementation.
-     *
-     * @return array{value: int, bits: int, algorithm: string, hex: string}
+     * @return array{value: ?int, bits: int, algorithm: string, hex: string}
      */
     public function jsonSerialize(): array
     {
         return [
-            'value' => $this->value,
+            'value' => in_array($this->bits, self::INT_CONSTRUCTOR_SIZES, true) ? $this->getValue() : null,
             'bits' => $this->bits,
             'algorithm' => $this->algorithm,
             'hex' => $this->toHex(),
         ];
     }
 
-    /**
-     * Get debug information for var_dump.
-     */
     public function __debugInfo(): array
     {
         return [
-            'value' => $this->value,
+            'value' => in_array($this->bits, self::INT_CONSTRUCTOR_SIZES, true) ? $this->getValue() : null,
             'bits' => $this->bits,
             'algorithm' => $this->algorithm,
             'hex' => $this->toHex(),
@@ -472,11 +427,46 @@ final class HashValue implements JsonSerializable
         ];
     }
 
-    /**
-     * String representation of the hash (returns hex).
-     */
     public function __toString(): string
     {
         return $this->toHex();
+    }
+
+    private static function intToBytes(int $value, int $bits): string
+    {
+        return match ($bits) {
+            8 => chr($value & 0xFF),
+            16 => pack('n', $value),
+            32 => pack('N', $value),
+            64 => pack('J', $value),
+        };
+    }
+
+    private static function bytesToInt(string $bytes, int $bits): int
+    {
+        return match ($bits) {
+            8 => ord($bytes),
+            16 => unpack('n', $bytes)[1],
+            32 => unpack('N', $bytes)[1],
+            64 => unpack('J', $bytes)[1],
+        };
+    }
+
+    private static function popcountBytes(string $bytes): int
+    {
+        if (self::$popcountTable === null) {
+            $table = [];
+            for ($i = 0; $i < 256; $i++) {
+                $table[$i] = substr_count(decbin($i), '1');
+            }
+            self::$popcountTable = $table;
+        }
+
+        $total = 0;
+        for ($i = 0, $len = strlen($bytes); $i < $len; $i++) {
+            $total += self::$popcountTable[ord($bytes[$i])];
+        }
+
+        return $total;
     }
 }

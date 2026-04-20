@@ -15,9 +15,11 @@ We're serving up a performance-oriented and opinionated collection of similarity
 
 ## Features
 
-- 🚀 **Multiple Algorithms**: Perceptual Hash (pHash), Difference Hash (dHash), and Color Histogram Hash
+- 🚀 **Multiple Algorithms**: Perceptual (pHash), Difference (dHash), Color Histogram, Mashed, and Block Mean hashes
+- 🧬 **Composite Hashes**: Concatenate several algorithms into a wider multi-view fingerprint (e.g. 256-bit `pHash + dHash + ColorHistogram + BlockMean`)
+- 🔎 **LSH + MIH helpers**: Split hashes into band / chunk keys for indexed similarity search at scale
 - 🔒 **Type Safety**: Value objects ensure you can't compare incompatible hashes
-- 🎯 **Configurable Bit Sizes**: Support for 8, 16, 32, and 64-bit hashes
+- 🎯 **Configurable Bit Sizes**: 8 / 16 / 32 / 64-bit integer hashes, plus wider 128 / 256-bit hashes via `HashValue::fromBytes()`
 - ⚡ **High Performance**: Optimized VIPS operations for speed
 - 🛠️ **Clean API**: Simple static methods with full IDE support
 - 🧩 **Extensible**: Strategy pattern makes adding new algorithms easy
@@ -72,6 +74,42 @@ A comprehensive image fingerprint that "mashes" together multiple image characte
 - **Social media ready**: Detects common edits like borders, filters, and crops
 - **Fast comparison**: Despite encoding 11 features, it's still just a 64-bit integer
 - **Complementary**: Works best when combined with pHash or dHash for robust matching
+
+**Gray coding note:** Ordinal integer fields (colorfulness, edge density,
+entropy, aspect ratio, RGB channel levels, brightness, texture, dominant
+colors) are stored in reflected-binary Gray code so adjacent quantization
+levels differ by exactly one bit. Reading raw bit fields directly sees
+the Gray-coded representation; use `MashedHash::decode($hash)` to read
+semantic values.
+
+### Block Mean Hash
+Spatial-domain fingerprint: resize the image to a √bits × √bits grayscale
+grid, compute the mean luminance of the whole grid, then set one bit per
+cell based on whether that cell is brighter than the overall mean.
+
+- Supports 8 / 16 / 32 / 64 / 128 / 256-bit output
+- Retains "where the bright/dark regions live" through luminance changes and JPEG re-encoding
+- Statistically independent from pHash (frequency-domain) and dHash (gradient-domain) — ideal as a 4th chunk in a composite hash
+
+### Composite Hash
+Concatenates several algorithms' 64-bit output into one wider fingerprint
+with independent signal types in each chunk. The default composition is
+the 256-bit "quartet" `pHash + dHash + ColorHistogram + BlockMean`:
+
+```php
+use LegitPHP\HashMoney\CompositeHash;
+
+$composite = CompositeHash::default();
+$hash = $composite->hashFromFile('/path/to/image.jpg');
+
+echo $hash->getBits();     // 256
+echo $hash->toHex();       // 64 hex chars
+echo $hash->getAlgorithm();// "composite:perceptual+dhash+color-histogram+block-mean"
+```
+
+Chunk boundaries are preserved in the `HashValue`'s `chunks` metadata so
+LSH helpers can band each chunk separately. See the
+[LSH helpers](#scaling-to-large-datasets-lsh--mih) section below.
 
 ## Requirements
 
@@ -404,6 +442,75 @@ if ($hash1->normalized() > 0.5 && $hash2->normalized() > 0.5) {
 }
 ```
 
+### Scaling to Large Datasets (LSH + MIH)
+
+Once you have millions of hashes in a database, naïve
+`BIT_COUNT(a ^ b) <= k` scans become prohibitively slow. Two helpers are
+provided for building indexed similarity search:
+
+#### Multi-Index Hashing (MIH) — best for 64-bit hashes, small thresholds
+
+For Hamming threshold `k` bits on a 64-bit hash, split the hash into
+`m > k` equal chunks. Pigeonhole: any two hashes within `k` bits must
+have at least one chunk matching exactly. Index each chunk as its own
+`BIGINT` column and query with `m` equality lookups, union the results,
+then verify the full Hamming distance on the small candidate set:
+
+```php
+use LegitPHP\HashMoney\MultiIndexHash;
+
+$hash = PerceptualHash::hashFromFile('image.jpg');
+$chunks = MultiIndexHash::chunks($hash, 8); // 8 × 8-bit chunks, safe for k ≤ 7
+
+// Persist chunks as BIGINT columns (mih_0..mih_7), each with its own index
+// ... then query:
+//   SELECT * FROM hashes
+//   WHERE mih_0=? OR mih_1=? OR mih_2=? ... OR mih_7=?
+// Union is your candidate set; verify with hammingDistance() in PHP.
+```
+
+MIH is typically 2–3 orders of magnitude faster than full-table
+`BIT_COUNT` scans for `k ≤ 8` on 64-bit hashes. For larger thresholds or
+wider hashes, use LSH banding instead.
+
+#### LSH Banding — best for composite / wider hashes
+
+For a wide hash, split into `B` bands of `R` bits each. Each band's
+bytes become a bucket key; two hashes are "candidates" when they share
+any bucket key. `Lsh::bandsByChunk()` is composite-aware — it sub-bands
+each semantic chunk independently so candidates are "matched on at least
+one of structure, edges, color, or layout":
+
+```php
+use LegitPHP\HashMoney\CompositeHash;
+use LegitPHP\HashMoney\Lsh;
+
+$composite = CompositeHash::default();
+$hash = $composite->hashFromFile('image.jpg');
+
+// 4 bands per chunk → 16 total bucket keys for the 256-bit quartet.
+$bucketKeys = Lsh::bandsByChunk($hash, bandsPerChunk: 4);
+// [
+//   'perceptual'       => [k1, k2, k3, k4],
+//   'dhash'            => [k5, k6, k7, k8],
+//   'color-histogram'  => [k9, k10, k11, k12],
+//   'block-mean'       => [k13, k14, k15, k16],
+// ]
+
+// Flat banding (no chunk awareness):
+$flatKeys = Lsh::bands($hash, bandCount: 16);
+```
+
+Tune bands vs. chunks against your dataset — more bands raises recall
+but inflates the candidate set. A reasonable starting point for a
+256-bit composite is 16 bands (B=16, R=16 → 65,536 buckets per band).
+
+Candidate-filtering is usually done in the database; see
+[`docs/LARAVEL_BRIDGE.md`](docs/LARAVEL_BRIDGE.md) for a proposed
+Laravel package that wires all of this (Eloquent cast, migrations,
+scopes, pluggable MySQL-chunked / MySQL-banded drivers) on top of this
+library.
+
 ### Real-World Examples
 
 #### Database Storage Pattern
@@ -585,7 +692,9 @@ Before generating hashes for a large production dataset (~100K images or more), 
 | **pHash** | Near-duplicate detection, scaled/compressed variants | Medium | Robust to compression, scaling, minor edits |
 | **dHash** | Quick similarity checks, cropped images | Fast | Good for crops, sensitive to rotation |
 | **ColorHistogram** | Color-based matching, filter detection | Fast | Catches recolored/filtered versions |
-| **MashedHash** | Comprehensive matching, reducing false positives | Medium | 11 features including borders, textures, layout |
+| **MashedHash** | Reducing false positives (as augmenting signal) | Medium | 11 Gray-coded features, read via `decode()` |
+| **BlockMean** | Spatial layout fingerprint | Fast | Orthogonal to pHash/dHash, 8/16/…/256-bit |
+| **Composite** | LSH-friendly multi-view fingerprint | Medium | Chunks carry independent signal types |
 
 ### Recommended Combinations
 
@@ -607,6 +716,15 @@ if (MashedHash::distance($mHash1, $mHash2) < 20 &&
 $pHash = PerceptualHash::hashFromFile($image);
 $dHash = DHash::hashFromFile($image);
 $colorHash = ColorHistogramHash::hashFromFile($image);
+```
+
+**For large-scale similarity search with LSH:**
+```php
+// One 256-bit composite instead of four separate hashes — lets you
+// band-index each chunk and do indexed candidate generation in the DB.
+$composite = CompositeHash::default();
+$hash = $composite->hashFromFile($image);
+$bucketKeys = Lsh::bandsByChunk($hash, bandsPerChunk: 4);
 ```
 
 ## Changelog
