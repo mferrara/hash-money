@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Jcupitt\Vips\Image;
 use LegitPHP\HashMoney\BlockMeanHash;
 use LegitPHP\HashMoney\HashValue;
 use LegitPHP\HashMoney\PerceptualHash;
@@ -68,7 +69,7 @@ test('128- and 256-bit hashes cannot use getValue()', function () {
 });
 
 test('throws on unsupported bit size', function () {
-    $image = Jcupitt\Vips\Image::newFromFile(__DIR__.'/../images/cat1.jpg');
+    $image = Image::newFromFile(__DIR__.'/../images/cat1.jpg');
     expect(fn () => BlockMeanHash::hashFromVipsImage($image, 48))
         ->toThrow(InvalidArgumentException::class, 'Unsupported bit size');
 });

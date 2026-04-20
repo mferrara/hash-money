@@ -6,6 +6,7 @@ use Jcupitt\Vips\Image;
 use LegitPHP\HashMoney\HashValue;
 use LegitPHP\HashMoney\MashedHash;
 use LegitPHP\HashMoney\PerceptualHash;
+use LegitPHP\HashMoney\Strategies\MashedHashStrategy;
 
 beforeEach(function () {
     MashedHash::configure(['cores' => 2]);
@@ -144,7 +145,7 @@ test('components decode into expected ranges', function () {
 test('gray coding: adjacent quantization levels differ by one bit in the field', function () {
     // Construct two component sets differing by exactly one ordinal level
     // and verify the Hamming distance in that field is exactly 1 bit.
-    $strategy = new \LegitPHP\HashMoney\Strategies\MashedHashStrategy;
+    $strategy = new MashedHashStrategy;
     $reflection = new ReflectionMethod($strategy, 'packComponents');
 
     $base = [
