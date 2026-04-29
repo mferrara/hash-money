@@ -9,6 +9,8 @@
         "phash",
         "dhash",
         "difference-hash",
+        "pdq",
+        "pdq-hash",
         "vips",
         "libvips",
         "image-processing",

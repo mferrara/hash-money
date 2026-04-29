@@ -5,6 +5,30 @@ All notable changes to `hash-money` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.3.0] - 2026-04-29
+
+### Added
+
+- **PDQ hash** — 256-bit perceptual hash from Meta's ThreatExchange,
+  designed for industrial-scale near-duplicate image detection.
+  `LegitPHP\HashMoney\PdqHash` is the static facade;
+  `LegitPHP\HashMoney\Strategies\PdqHashStrategy` is the underlying
+  Strategy (drop-in for `CompositeHash::of()`). Pipeline: Rec. 601
+  luminance → two-pass Jarosz 1-D box filter (tent approximation) →
+  64×64 decimation → 16×16 DCT → median threshold → 256 bits.
+  Match threshold per Meta is Hamming distance ≤ 31 of 256 bits.
+- **PDQ quality metric** — alongside the hash, PDQ reports a
+  gradient-derived quality score in [0, 100]. Meta recommends discarding
+  hashes with quality < 50 (uniform/blurry images that hash unreliably).
+  Accessible via `PdqHash::quality($hash)` or
+  `$hash->getMetadata('pdq_quality')`. This is a new capability for the
+  package — none of the previous algorithms self-report reliability.
+- **PDQ dihedral hashes** — `PdqHash::hashesFromFile()` returns all
+  eight rotation/flip variants in one pass, for matching images whose
+  orientation may have been changed.
+- **Third-party notices** — `LICENSE.md` now reproduces the upstream
+  BSD-3-Clause license from `facebook/ThreatExchange` for the PDQ port.
+
 ## [1.2.0] - 2026-04-20
 
 ### Added

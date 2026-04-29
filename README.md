@@ -15,7 +15,7 @@ We're serving up a performance-oriented and opinionated collection of similarity
 
 ## Features
 
-- 🚀 **Multiple Algorithms**: Perceptual (pHash), Difference (dHash), Color Histogram, Mashed, and Block Mean hashes
+- 🚀 **Multiple Algorithms**: Perceptual (pHash), Difference (dHash), Color Histogram, Mashed, Block Mean, and PDQ hashes
 - 🧬 **Composite Hashes**: Concatenate several algorithms into a wider multi-view fingerprint (e.g. 256-bit `pHash + dHash + ColorHistogram + BlockMean`)
 - 🔎 **LSH + MIH helpers**: Split hashes into band / chunk keys for indexed similarity search at scale
 - 🔒 **Type Safety**: Value objects ensure you can't compare incompatible hashes
@@ -91,6 +91,29 @@ cell based on whether that cell is brighter than the overall mean.
 - Retains "where the bright/dark regions live" through luminance changes and JPEG re-encoding
 - Statistically independent from pHash (frequency-domain) and dHash (gradient-domain) — ideal as a 4th chunk in a composite hash
 
+### PDQ Hash
+Industrial-scale 256-bit perceptual hash from
+[Meta ThreatExchange](https://github.com/facebook/ThreatExchange/tree/main/pdq).
+Closely related to pHash but designed for billions-scale matching:
+
+- **Larger output** — 256 bits vs. pHash's 64. Far lower birthday-collision
+  rate at scale; you can store millions of hashes without the false-positive
+  drift you'd see at 64 bits.
+- **Quality metric** — alongside the hash, PDQ reports a gradient-derived
+  reliability score in [0, 100]. Meta recommends discarding hashes with
+  quality below 50 (uniform/blurry images, where the median threshold isn't
+  meaningful). Accessible via `PdqHash::quality($hash)` or
+  `$hash->getMetadata('pdq_quality')`.
+- **Eight dihedral hashes** — `PdqHash::hashesFromFile()` returns all
+  rotation and flip variants in a single pass.
+- **Recommended match threshold** — Hamming distance ≤ 31 of 256 bits.
+- **Pipeline** — Rec. 601 luminance → two-pass Jarosz 1-D box filter (a
+  tent approximation, Wojciech Jarosz, "Fast Image Convolutions",
+  SIGGRAPH 2001) → 64×64 decimation → 16×16 DCT-II → median threshold.
+
+This is an independent port of Meta's BSD-3-Clause reference. See
+[LICENSE.md](LICENSE.md) for the third-party notice.
+
 ### Composite Hash
 Concatenates several algorithms' 64-bit output into one wider fingerprint
 with independent signal types in each chunk. The default composition is
@@ -162,6 +185,7 @@ use LegitPHP\HashMoney\PerceptualHash;
 use LegitPHP\HashMoney\DHash;
 use LegitPHP\HashMoney\ColorHistogramHash;
 use LegitPHP\HashMoney\MashedHash;
+use LegitPHP\HashMoney\PdqHash;
 
 // Generate a perceptual hash
 $pHash = PerceptualHash::hashFromFile('/path/to/image.jpg');
@@ -178,6 +202,11 @@ echo $colorHash->toHex(); // e.g., "a1b2c3d4e5f6g7h8"
 // Generate a MashedHash (comprehensive fingerprint)
 $mHash = MashedHash::hashFromFile('/path/to/image.jpg');
 echo $mHash->toHex(); // e.g., "1cf0e2a3b4596d87"
+
+// Generate a PDQ hash (256-bit, with quality score)
+$pdqHash = PdqHash::hashFromFile('/path/to/image.jpg');
+echo $pdqHash->toHex(); // 64 hex chars
+echo PdqHash::quality($pdqHash); // 0-100; Meta recommends discarding < 50
 
 // Compare images
 $hash1 = PerceptualHash::hashFromFile('/path/to/image1.jpg');
@@ -669,6 +698,12 @@ composer format
 - **DHash** is typically 2-3x faster than **Perceptual Hash**
 - **Color Histogram Hash** is comparable to DHash in speed
 - **MashedHash** is slightly slower but provides the richest feature set
+- **PDQ** is the slowest of the algorithms (~150–200 ms/image at the
+  default 512×512 working size) — the Jarosz tent filter and 16×16 DCT
+  run in pure PHP, not libvips. Tune via
+  `PdqHash::configure(['workingSize' => 256])` to halve the cost at the
+  expense of less Jarosz blur. Worth the headroom for production
+  near-dup detection where 256-bit signal and quality filtering matter.
 - Smaller bit sizes compute faster but may reduce accuracy
 - VIPS caching significantly improves performance for batch operations
 - The package automatically detects CPU cores for optimal concurrency
@@ -694,6 +729,7 @@ Before generating hashes for a large production dataset (~100K images or more), 
 | **ColorHistogram** | Color-based matching, filter detection | Fast | Catches recolored/filtered versions |
 | **MashedHash** | Reducing false positives (as augmenting signal) | Medium | 11 Gray-coded features, read via `decode()` |
 | **BlockMean** | Spatial layout fingerprint | Fast | Orthogonal to pHash/dHash, 8/16/…/256-bit |
+| **PDQ** | Large-scale near-duplicate detection (256-bit) | Slower | 256-bit, gradient-based **quality metric**, 8 dihedral variants |
 | **Composite** | LSH-friendly multi-view fingerprint | Medium | Chunks carry independent signal types |
 
 ### Recommended Combinations
@@ -726,6 +762,39 @@ $composite = CompositeHash::default();
 $hash = $composite->hashFromFile($image);
 $bucketKeys = Lsh::bandsByChunk($hash, bandsPerChunk: 4);
 ```
+
+**For industrial-scale near-duplicate detection with PDQ:**
+```php
+use LegitPHP\HashMoney\PdqHash;
+use LegitPHP\HashMoney\Strategies\PdqHashStrategy;
+
+$hash = PdqHash::hashFromFile($image);
+$quality = PdqHash::quality($hash);
+
+// Meta's recommended thresholds
+if ($quality < PdqHashStrategy::RECOMMENDED_QUALITY_THRESHOLD) {
+    // Image hashes unreliably (uniform / blurry) — skip or fall back to MashedHash.
+    return null;
+}
+
+if (PdqHash::distance($hash, $candidate) <= PdqHashStrategy::RECOMMENDED_DISTANCE_THRESHOLD) {
+    // Near-duplicate (≤ 31 of 256 bits differ).
+}
+
+// Catch rotated / flipped duplicates by hashing all eight dihedral variants once
+// and matching the candidate's "orig" hash against any of them.
+$variants = PdqHash::hashesFromFile($image);
+foreach ($variants['hashes'] as $name => $variantHash) {
+    if (PdqHash::distance($variantHash, $candidate) <= 31) {
+        // Match under transform "$name" (orig / r090 / r180 / r270 / flpx / flpy / flpp / flpm).
+    }
+}
+```
+
+PDQ produces a 256-bit `HashValue` directly — no `getValue()`-style int
+accessor; use `toHex()`, `getBytes()`, or `toBase64()` for storage. Wide
+LSH banding works exactly like for `CompositeHash` outputs: pass the
+`HashValue` to `Lsh::bands($hash, $bandCount)`.
 
 ## Changelog
 
