@@ -84,7 +84,7 @@ abstract class AbstractHashStrategy implements HashStrategy
 
         try {
             $size = $this->getImageSizeForBits($bits);
-            $image = VipsImage::thumbnail_buffer($imageData, $size['width'], array_merge([
+            $image = $this->thumbnailFromBuffer($imageData, $size['width'], array_merge([
                 'height' => $size['height'],
                 'size' => 'force',
                 'linear' => true,
@@ -95,6 +95,37 @@ abstract class AbstractHashStrategy implements HashStrategy
             return $this->hashFromVipsImage($image, $bits);
         } catch (Exception $e) {
             throw new \RuntimeException('Failed to generate hash from buffer: '.$e->getMessage(), 0, $e);
+        }
+    }
+
+    /**
+     * Decode + downscale a source buffer for hashing, tolerating
+     * recoverable corruption.
+     *
+     * copyMemory() is load-bearing in both branches: vips pipelines are
+     * lazy, so without it a decode error would only surface later (at
+     * writeToArray), outside this method's try.
+     *
+     * The fallback exists because sequential shrink-on-load escalates
+     * recoverable decode warnings (e.g. "Corrupt JPEG data: N extraneous
+     * bytes before marker 0xdN" from damaged restart markers) into hard
+     * errors on some libvips versions — observed on 8.15, while 8.18
+     * tolerates the same bytes. A full random-access decode with
+     * fail_on=none lets libjpeg resync past the damage and produce
+     * pixels; genuinely undecodable bytes still throw here and surface
+     * through the caller's RuntimeException wrapper.
+     */
+    protected function thumbnailFromBuffer(string $imageData, int $width, array $options): VipsImage
+    {
+        try {
+            return VipsImage::thumbnail_buffer($imageData, $width, $options)->copyMemory();
+        } catch (Exception) {
+            $source = VipsImage::newFromBuffer($imageData, '', [
+                'access' => 'random',
+                'fail_on' => 'none',
+            ])->copyMemory();
+
+            return $source->thumbnail_image($width, $options)->copyMemory();
         }
     }
 

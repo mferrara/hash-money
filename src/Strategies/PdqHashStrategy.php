@@ -140,7 +140,7 @@ class PdqHashStrategy extends AbstractHashStrategy
         $this->initVips();
 
         try {
-            $image = VipsImage::thumbnail_buffer($imageData, $this->workingSize, array_merge([
+            $image = $this->thumbnailFromBuffer($imageData, $this->workingSize, array_merge([
                 'height' => $this->workingSize,
                 'size' => 'down',
                 'import_profile' => 'srgb',
@@ -189,7 +189,7 @@ class PdqHashStrategy extends AbstractHashStrategy
     {
         $this->initVips();
 
-        $image = VipsImage::thumbnail_buffer($imageData, $this->workingSize, array_merge([
+        $image = $this->thumbnailFromBuffer($imageData, $this->workingSize, array_merge([
             'height' => $this->workingSize,
             'size' => 'down',
             'import_profile' => 'srgb',

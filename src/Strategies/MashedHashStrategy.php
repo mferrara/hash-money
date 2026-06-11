@@ -128,7 +128,7 @@ class MashedHashStrategy extends AbstractHashStrategy
 
             // Now do thumbnail
             $size = $this->getImageSizeForBits($bits);
-            $image = VipsImage::thumbnail_buffer($imageData, $size['width'], array_merge([
+            $image = $this->thumbnailFromBuffer($imageData, $size['width'], array_merge([
                 'height' => $size['height'],
                 'size' => 'force',
                 'linear' => true,
